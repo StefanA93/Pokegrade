@@ -358,6 +358,7 @@ function ScanScreen({ user, profile, onScanDone }) {
       const end = raw.lastIndexOf('}')
       const parsed = JSON.parse(raw.slice(start, end + 1))
       const officialImg = await fetchOfficialImage(game, parsed.cardName)
+      console.log('Kortnavn:', parsed.cardName, '| Billede:', officialImg)
       setResult({ ...parsed, officialImageUrl: officialImg })
       onScanDone()
     } catch (err) {
@@ -434,27 +435,21 @@ function GradeResult({ result, game, frontImg, user, onSave }) {
   async function save() {
     setSaving(true)
 
-    // Upload billede til Supabase Storage
-    let imageUrl = null
-    if (frontImg) {
-      try {
-        const parts = frontImg.split(',')
-        const mime = parts[0].match(/:(.*?);/)[1]
-        const binary = atob(parts[1])
-        const arr = new Uint8Array(binary.length)
-        for (let i = 0; i < binary.length; i++) arr[i] = binary.charCodeAt(i)
-        const blob = new Blob([arr], { type: mime })
-        const fileName = `${user.id}/${Date.now()}.jpg`
-        const { error: upErr } = await supabase.storage
-          .from('card-images')
-          .upload(fileName, blob, { contentType: 'image/jpeg' })
-        if (upErr) {
-          console.error('Storage upload fejl:', upErr.message)
-        } else {
-          const { data: urlData } = supabase.storage.from('card-images').getPublicUrl(fileName)
-          imageUrl = urlData.publicUrl
+    // Lav lille thumbnail (200px) og gem som data URL direkte i DB
+    let imageUrl = result.officialImageUrl || null
+    if (!imageUrl && frontImg) {
+      imageUrl = await new Promise(resolve => {
+        const img = new Image()
+        img.onload = () => {
+          const canvas = document.createElement('canvas')
+          const ratio = Math.min(200 / img.width, 267 / img.height)
+          canvas.width = img.width * ratio
+          canvas.height = img.height * ratio
+          canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height)
+          resolve(canvas.toDataURL('image/jpeg', 0.7))
         }
-      } catch (e) { console.error('Storage exception:', e) }
+        img.src = frontImg
+      })
     }
 
     // Parse prisinterval — tag gennemsnittet af "40-65€" → 52
