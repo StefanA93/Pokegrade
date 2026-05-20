@@ -1,8 +1,16 @@
-export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*')
+export const config = { runtime: 'edge' }
 
-  const { game, name } = req.query
-  if (!name) return res.json({ url: null })
+export default async function handler(req) {
+  const { searchParams } = new URL(req.url)
+  const game = searchParams.get('game') || ''
+  const name = searchParams.get('name') || ''
+
+  const headers = {
+    'Content-Type': 'application/json',
+    'Access-Control-Allow-Origin': '*',
+  }
+
+  if (!name) return new Response(JSON.stringify({ url: null }), { headers })
 
   let imageUrl = null
 
@@ -34,5 +42,5 @@ export default async function handler(req, res) {
     console.error('cardimage error:', e.message)
   }
 
-  res.json({ url: imageUrl, name })
+  return new Response(JSON.stringify({ url: imageUrl, name }), { headers })
 }
