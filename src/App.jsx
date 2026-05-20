@@ -410,15 +410,35 @@ function GradeResult({ result, game, frontImg, user, onSave }) {
 
   async function save() {
     setSaving(true)
+
+    // Upload billede til Supabase Storage
+    let imageUrl = null
+    if (frontImg) {
+      try {
+        const blob = await fetch(frontImg).then(r => r.blob())
+        const fileName = `${user.id}/${Date.now()}.jpg`
+        const { error: upErr } = await supabase.storage
+          .from('card-images')
+          .upload(fileName, blob, { contentType: 'image/jpeg' })
+        if (!upErr) {
+          const { data: urlData } = supabase.storage.from('card-images').getPublicUrl(fileName)
+          imageUrl = urlData.publicUrl
+        }
+      } catch {}
+    }
+
+    // Parse prisinterval — tag gennemsnittet af "40-65€" → 52
     const valueStr = result.estimatedPSAValue || ''
-    const valueMatch = valueStr.match(/[\d]+/)
-    const valueNum = valueMatch ? parseFloat(valueMatch[0]) : null
+    const nums = [...valueStr.matchAll(/\d+/g)].map(m => parseFloat(m[0]))
+    const valueNum = nums.length >= 2 ? (nums[0] + nums[1]) / 2 : nums[0] || null
+
     const { error } = await supabase.from('cards').insert({
       user_id: user.id,
       name: result.cardName || result.name || result.kortNavn || null,
       game,
       grade: result.estimatedGrade,
       value: valueNum,
+      image_url: imageUrl,
       notes: result.recommendation,
     })
     if (error) {
