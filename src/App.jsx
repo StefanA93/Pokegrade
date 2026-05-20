@@ -233,6 +233,53 @@ function AuthScreen({ onAuth }) {
   )
 }
 
+// CAMERA MODAL
+function CameraModal({ onCapture, onClose }) {
+  const videoRef = useRef()
+  const streamRef = useRef()
+  const [ready, setReady] = useState(false)
+  const [err, setErr] = useState('')
+
+  useEffect(() => {
+    async function start() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }
+        })
+        streamRef.current = stream
+        videoRef.current.srcObject = stream
+        videoRef.current.play()
+        setReady(true)
+      } catch {
+        setErr('Kunne ikke åbne kamera. Tillad kameraadgang i browseren.')
+      }
+    }
+    start()
+    return () => streamRef.current?.getTracks().forEach(t => t.stop())
+  }, [])
+
+  function capture() {
+    const canvas = document.createElement('canvas')
+    canvas.width = videoRef.current.videoWidth
+    canvas.height = videoRef.current.videoHeight
+    canvas.getContext('2d').drawImage(videoRef.current, 0, 0)
+    streamRef.current?.getTracks().forEach(t => t.stop())
+    onCapture(canvas.toDataURL('image/jpeg', 0.85))
+  }
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: '#000', zIndex: 1000, display: 'flex', flexDirection: 'column' }}>
+      <video ref={videoRef} playsInline style={{ flex: 1, objectFit: 'cover', width: '100%' }} />
+      {err && <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, textAlign: 'center', color: COLORS.danger, fontSize: 15 }}>{err}</div>}
+      <div style={{ padding: '24px 32px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#000' }}>
+        <button onClick={onClose} style={{ color: COLORS.muted, fontSize: 16, padding: 12 }}>Annuller</button>
+        <button onClick={capture} disabled={!ready} style={{ width: 72, height: 72, borderRadius: '50%', background: ready ? '#fff' : '#555', border: '4px solid #aaa' }} />
+        <div style={{ width: 60 }} />
+      </div>
+    </div>
+  )
+}
+
 // SCAN SCREEN
 function ScanScreen({ user, profile, onScanDone }) {
   const [game, setGame] = useState('pokemon')
@@ -241,12 +288,24 @@ function ScanScreen({ user, profile, onScanDone }) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [result, setResult] = useState(null)
+  const [camera, setCamera] = useState(null) // 'front' | 'back' | null
   const frontRef = useRef()
   const backRef = useRef()
 
-  async function pickImage(side) {
-    const input = side === 'front' ? frontRef.current : backRef.current
-    input.click()
+  function pickImage(side) {
+    if (navigator.mediaDevices?.getUserMedia) {
+      setCamera(side)
+    } else {
+      const input = side === 'front' ? frontRef.current : backRef.current
+      input.click()
+    }
+  }
+
+  function handleCameraCapture(dataUrl) {
+    if (camera === 'front') setFrontImg(dataUrl)
+    else setBackImg(dataUrl)
+    setCamera(null)
+    setResult(null)
   }
 
   async function handleFile(e, side) {
@@ -287,8 +346,9 @@ function ScanScreen({ user, profile, onScanDone }) {
 
   return (
     <div style={{ padding: '16px 16px 100px', maxWidth: 480, margin: '0 auto' }}>
-      <input ref={frontRef} type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={e => handleFile(e, 'front')} />
-      <input ref={backRef} type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={e => handleFile(e, 'back')} />
+      {camera && <CameraModal onCapture={handleCameraCapture} onClose={() => setCamera(null)} />}
+      <input ref={frontRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={e => handleFile(e, 'front')} />
+      <input ref={backRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={e => handleFile(e, 'back')} />
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, paddingTop: 8 }}>
         <h2 style={{ fontWeight: 900, fontSize: 22 }}>AI Kortanalyse</h2>
