@@ -420,11 +420,13 @@ function GradeResult({ result, game, frontImg, user, onSave }) {
         const { error: upErr } = await supabase.storage
           .from('card-images')
           .upload(fileName, blob, { contentType: 'image/jpeg' })
-        if (!upErr) {
+        if (upErr) {
+          console.error('Storage upload fejl:', upErr.message)
+        } else {
           const { data: urlData } = supabase.storage.from('card-images').getPublicUrl(fileName)
           imageUrl = urlData.publicUrl
         }
-      } catch {}
+      } catch (e) { console.error('Storage exception:', e) }
     }
 
     // Parse prisinterval — tag gennemsnittet af "40-65€" → 52
@@ -438,6 +440,7 @@ function GradeResult({ result, game, frontImg, user, onSave }) {
       game,
       grade: result.estimatedGrade,
       value: valueNum,
+      price_range: result.estimatedPSAValue || null,
       image_url: imageUrl,
       notes: result.recommendation,
     })
@@ -630,7 +633,7 @@ function CardItem({ card, onDelete }) {
         <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 2 }}>{card.name || 'Ukendt kort'}</div>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           {card.grade && <span style={{ fontSize: 12, color: gradeColor, fontWeight: 900 }}>PSA {card.grade}</span>}
-          {card.value && <span style={{ fontSize: 12, color: COLORS.gold, fontWeight: 700 }}>{formatEur(card.value)}</span>}
+          {card.price_range && <span style={{ fontSize: 12, color: COLORS.gold, fontWeight: 700 }}>{card.price_range}</span>}
         </div>
       </div>
       <button onClick={deleteCard} style={{ color: COLORS.muted, fontSize: 11, textAlign: 'right' }}>Slet</button>
