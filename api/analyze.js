@@ -133,6 +133,40 @@ export default async function handler(req) {
   const aiData = await anthropicRes.json()
   const analysisText = aiData.content?.[0]?.text || ''
 
+  // Hent officielt kortbillede fra API
+  let officialImageUrl = null
+  try {
+    const raw = analysisText
+    const start = raw.indexOf('{')
+    const end = raw.lastIndexOf('}')
+    if (start !== -1 && end !== -1) {
+      const parsed = JSON.parse(raw.slice(start, end + 1))
+      const cardName = parsed.cardName
+      if (cardName) {
+        if (game === 'pokemon') {
+          const r = await fetch(`https://api.pokemontcg.io/v2/cards?q=name:"${encodeURIComponent(cardName)}"&pageSize=1&select=images`)
+          const d = await r.json()
+          officialImageUrl = d.data?.[0]?.images?.large || d.data?.[0]?.images?.small
+          if (!officialImageUrl) {
+            const r2 = await fetch(`https://api.pokemontcg.io/v2/cards?q=name:${encodeURIComponent(cardName)}*&pageSize=1&select=images`)
+            const d2 = await r2.json()
+            officialImageUrl = d2.data?.[0]?.images?.large || d2.data?.[0]?.images?.small
+          }
+        } else if (game === 'mtg') {
+          const r = await fetch(`https://api.scryfall.com/cards/named?fuzzy=${encodeURIComponent(cardName)}`)
+          const d = await r.json()
+          if (d.object !== 'error') officialImageUrl = d.image_uris?.large || d.image_uris?.normal
+        } else if (game === 'yugioh') {
+          const r = await fetch(`https://db.ygoprodeck.com/api/v7/cardinfo.php?fname=${encodeURIComponent(cardName)}`)
+          const d = await r.json()
+          officialImageUrl = d.data?.[0]?.card_images?.[0]?.image_url || null
+        }
+      }
+    }
+  } catch (e) {
+    console.error('Image lookup error:', e.message)
+  }
+
   // Log scan i Supabase
   await fetch(`${SUPABASE_URL}/rest/v1/scan_logs`, {
     method: 'POST',
@@ -155,7 +189,7 @@ export default async function handler(req) {
     body: JSON.stringify({ total_scans: (profile.total_scans || 0) + 1 })
   })
 
-  return new Response(JSON.stringify({ analysis: analysisText }), {
+  return new Response(JSON.stringify({ analysis: analysisText, officialImageUrl }), {
     headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
   })
 }

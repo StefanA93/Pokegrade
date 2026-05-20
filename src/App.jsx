@@ -345,9 +345,7 @@ function ScanScreen({ user, profile, onScanDone }) {
       const start = raw.indexOf('{')
       const end = raw.lastIndexOf('}')
       const parsed = JSON.parse(raw.slice(start, end + 1))
-      const officialImg = await fetchOfficialImage(game, parsed.cardName)
-      console.log('Kortnavn:', parsed.cardName, '| Billede:', officialImg)
-      setResult({ ...parsed, officialImageUrl: officialImg })
+      setResult({ ...parsed, officialImageUrl: data.officialImageUrl || null })
       onScanDone()
     } catch (err) {
       setError(err.message)
