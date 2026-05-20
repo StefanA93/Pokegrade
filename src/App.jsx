@@ -271,7 +271,8 @@ function ScanScreen({ user, profile, onScanDone }) {
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Analyse fejlede')
-      const parsed = JSON.parse(data.analysis)
+      const cleaned = data.analysis.replace(/^```json\s*/i, '').replace(/```\s*$/, '').trim()
+      const parsed = JSON.parse(cleaned)
       setResult(parsed)
       onScanDone()
     } catch (err) {
