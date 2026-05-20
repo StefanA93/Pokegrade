@@ -496,6 +496,7 @@ function GradeResult({ result, game, frontImg, user, onSave }) {
       <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 20 }}>
         {(result.officialImageUrl || frontImg) && <img src={result.officialImageUrl || frontImg} style={{ width: 60, aspectRatio: '3/4', objectFit: 'cover', borderRadius: 8 }} alt="kort" />}
         <div>
+          <div style={{ fontSize: 11, color: COLORS.gold, marginBottom: 2 }}>{result.cardName || '(intet kortnavn)'} {result.officialImageUrl ? '✅ API-billede' : '📷 Eget foto'}</div>
           <div style={{ fontSize: 13, color: COLORS.muted, marginBottom: 4 }}>Estimeret PSA-grad</div>
           <div style={{ fontSize: 48, fontWeight: 900, color: gradeColor, lineHeight: 1 }}>{result.estimatedGrade}</div>
           <Badge color={result.confidence === 'Høj' ? COLORS.success : result.confidence === 'Middel' ? COLORS.gold : COLORS.muted}>
