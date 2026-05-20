@@ -233,6 +233,29 @@ function AuthScreen({ onAuth }) {
   )
 }
 
+// OFFICIAL CARD IMAGE LOOKUP
+async function fetchOfficialImage(game, cardName) {
+  if (!cardName) return null
+  try {
+    if (game === 'pokemon') {
+      const res = await fetch(`https://api.pokemontcg.io/v2/cards?q=name:"${encodeURIComponent(cardName)}"&pageSize=1&select=images`)
+      const data = await res.json()
+      return data.data?.[0]?.images?.large || data.data?.[0]?.images?.small || null
+    }
+    if (game === 'mtg') {
+      const res = await fetch(`https://api.scryfall.com/cards/named?fuzzy=${encodeURIComponent(cardName)}`)
+      const data = await res.json()
+      return data.image_uris?.normal || data.card_faces?.[0]?.image_uris?.normal || null
+    }
+    if (game === 'yugioh') {
+      const res = await fetch(`https://db.ygoprodeck.com/api/v7/cardinfo.php?name=${encodeURIComponent(cardName)}`)
+      const data = await res.json()
+      return data.data?.[0]?.card_images?.[0]?.image_url || null
+    }
+  } catch {}
+  return null
+}
+
 // CAMERA MODAL
 function CameraModal({ onCapture, onClose }) {
   const videoRef = useRef()
@@ -334,8 +357,8 @@ function ScanScreen({ user, profile, onScanDone }) {
       const start = raw.indexOf('{')
       const end = raw.lastIndexOf('}')
       const parsed = JSON.parse(raw.slice(start, end + 1))
-      console.log('AI svar:', parsed)
-      setResult(parsed)
+      const officialImg = await fetchOfficialImage(game, parsed.cardName)
+      setResult({ ...parsed, officialImageUrl: officialImg })
       onScanDone()
     } catch (err) {
       setError(err.message)
@@ -446,7 +469,7 @@ function GradeResult({ result, game, frontImg, user, onSave }) {
       grade: result.estimatedGrade,
       value: valueNum,
       price_range: result.estimatedPSAValue || null,
-      image_url: imageUrl,
+      image_url: result.officialImageUrl || imageUrl,
       notes: result.recommendation,
     })
     if (error) {
@@ -469,7 +492,7 @@ function GradeResult({ result, game, frontImg, user, onSave }) {
   return (
     <Card style={{ marginTop: 20 }} className="slideUp">
       <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 20 }}>
-        {frontImg && <img src={frontImg} style={{ width: 60, aspectRatio: '3/4', objectFit: 'cover', borderRadius: 8 }} alt="kort" />}
+        {(result.officialImageUrl || frontImg) && <img src={result.officialImageUrl || frontImg} style={{ width: 60, aspectRatio: '3/4', objectFit: 'cover', borderRadius: 8 }} alt="kort" />}
         <div>
           <div style={{ fontSize: 13, color: COLORS.muted, marginBottom: 4 }}>Estimeret PSA-grad</div>
           <div style={{ fontSize: 48, fontWeight: 900, color: gradeColor, lineHeight: 1 }}>{result.estimatedGrade}</div>
