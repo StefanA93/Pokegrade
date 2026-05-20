@@ -25,9 +25,4 @@
       ]
     }
   ],
-  "functions": {
-    "api/analyze.js": {
-      "runtime": "edge"
-    }
-  }
 }
