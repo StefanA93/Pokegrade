@@ -1,0 +1,16 @@
+{
+  "name": "GradeDex EU",
+  "short_name": "GradeDex",
+  "description": "AI kortgradéring og portfolio til det europæiske marked",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0a0a12",
+  "theme_color": "#e8c56d",
+  "orientation": "portrait",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ],
+  "screenshots": [],
+  "categories": ["utilities", "finance"]
+}
