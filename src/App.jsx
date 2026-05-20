@@ -502,6 +502,7 @@ function CollectionScreen({ user }) {
   const [search, setSearch] = useState('')
   const [filterGame, setFilterGame] = useState('all')
   const [sortBy, setSortBy] = useState('newest')
+  const [dbError, setDbError] = useState('')
 
   useEffect(() => {
     loadCards()
@@ -509,8 +510,12 @@ function CollectionScreen({ user }) {
 
   async function loadCards() {
     setLoading(true)
+    setDbError('')
     const { data, error } = await supabase.from('cards').select('*').eq('user_id', user.id).order('created_at', { ascending: false })
-    if (error) console.error('loadCards error:', error)
+    if (error) {
+      console.error('loadCards error:', error)
+      setDbError(`DB fejl: ${error.message} (code: ${error.code})`)
+    }
     setCards(data || [])
     setLoading(false)
   }
@@ -560,6 +565,8 @@ function CollectionScreen({ user }) {
           </button>
         ))}
       </div>
+
+      {dbError && <div style={{ background: COLORS.danger + '22', border: `1px solid ${COLORS.danger}`, borderRadius: 12, padding: 14, marginBottom: 16, fontSize: 13, color: COLORS.danger }}>{dbError}</div>}
 
       {loading ? (
         <div style={{ textAlign: 'center', padding: 60 }}><Spinner /></div>
