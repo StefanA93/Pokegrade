@@ -269,12 +269,12 @@ function CameraModal({ onCapture, onClose }) {
 
   return (
     <div style={{ position: 'fixed', inset: 0, background: '#000', zIndex: 1000, display: 'flex', flexDirection: 'column' }}>
-      <video ref={videoRef} playsInline style={{ flex: 1, objectFit: 'cover', width: '100%' }} />
-      {err && <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, textAlign: 'center', color: COLORS.danger, fontSize: 15 }}>{err}</div>}
-      <div style={{ padding: '24px 32px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#000' }}>
-        <button onClick={onClose} style={{ color: COLORS.muted, fontSize: 16, padding: 12 }}>Annuller</button>
-        <button onClick={capture} disabled={!ready} style={{ width: 72, height: 72, borderRadius: '50%', background: ready ? '#fff' : '#555', border: '4px solid #aaa' }} />
-        <div style={{ width: 60 }} />
+      <video ref={videoRef} playsInline style={{ width: '100%', height: 'calc(100dvh - 140px)', objectFit: 'cover' }} />
+      {err && <div style={{ position: 'absolute', top: '40%', left: 0, right: 0, padding: 24, textAlign: 'center', color: COLORS.danger, fontSize: 15, background: '#000a' }}>{err}</div>}
+      <div style={{ height: 140, background: '#111', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0 32px', paddingBottom: 'env(safe-area-inset-bottom)' }}>
+        <button onClick={onClose} style={{ color: '#fff', fontSize: 15, padding: 12, minWidth: 80 }}>Annuller</button>
+        <button onClick={capture} disabled={!ready} style={{ width: 76, height: 76, borderRadius: '50%', background: ready ? '#fff' : '#555', border: '5px solid #888', flexShrink: 0 }} />
+        <div style={{ minWidth: 80 }} />
       </div>
     </div>
   )
