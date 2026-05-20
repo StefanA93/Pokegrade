@@ -415,7 +415,12 @@ function GradeResult({ result, game, frontImg, user, onSave }) {
     let imageUrl = null
     if (frontImg) {
       try {
-        const blob = await fetch(frontImg).then(r => r.blob())
+        const parts = frontImg.split(',')
+        const mime = parts[0].match(/:(.*?);/)[1]
+        const binary = atob(parts[1])
+        const arr = new Uint8Array(binary.length)
+        for (let i = 0; i < binary.length; i++) arr[i] = binary.charCodeAt(i)
+        const blob = new Blob([arr], { type: mime })
         const fileName = `${user.id}/${Date.now()}.jpg`
         const { error: upErr } = await supabase.storage
           .from('card-images')
