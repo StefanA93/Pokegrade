@@ -244,7 +244,7 @@ function CameraModal({ onCapture, onClose }) {
     async function start() {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }
+          video: { facingMode: { exact: 'environment' } }
         })
         streamRef.current = stream
         videoRef.current.srcObject = stream
