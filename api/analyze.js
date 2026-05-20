@@ -173,8 +173,9 @@ function buildPrompt(game, hasBack) {
 
   return `Du er ekspert i ${gameName} kortgradéring efter PSA-standarden. Analyser ${hasBack ? 'disse to billeder (forside og bagside)' : 'dette kortbillede'} og giv en professionel PSA-gradéringsvurdering.
 
-Returner PRÆCIST dette JSON-format (ingen forklarende tekst uden for JSON):
+Returner KUN dette JSON-objekt — ingen tekst før eller efter, ingen markdown, ingen kodeblokke:
 {
+  "cardName": "<kortets navn som vist på kortet>",
   "estimatedGrade": <tal 1-10>,
   "confidence": "<Høj|Middel|Lav>",
   "centering": "<beskrivelse>",

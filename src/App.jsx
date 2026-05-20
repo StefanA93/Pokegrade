@@ -334,6 +334,7 @@ function ScanScreen({ user, profile, onScanDone }) {
       const start = raw.indexOf('{')
       const end = raw.lastIndexOf('}')
       const parsed = JSON.parse(raw.slice(start, end + 1))
+      console.log('AI svar:', parsed)
       setResult(parsed)
       onScanDone()
     } catch (err) {
@@ -410,10 +411,11 @@ function GradeResult({ result, game, frontImg, user, onSave }) {
   async function save() {
     setSaving(true)
     const valueStr = result.estimatedPSAValue || ''
-    const valueNum = parseFloat(valueStr.replace(/[^0-9.]/g, '')) || null
+    const valueMatch = valueStr.match(/[\d]+/)
+    const valueNum = valueMatch ? parseFloat(valueMatch[0]) : null
     const { error } = await supabase.from('cards').insert({
       user_id: user.id,
-      name: result.cardName || 'Ukendt kort',
+      name: result.cardName || result.name || result.kortNavn || null,
       game,
       grade: result.estimatedGrade,
       value: valueNum,
