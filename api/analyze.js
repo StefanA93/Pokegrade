@@ -135,36 +135,30 @@ export default async function handler(req) {
 
   // Hent officielt kortbillede fra API
   let officialImageUrl = null
+  let debugInfo = { cardName: null, apiStatus: null, apiResult: null }
   try {
     const raw = analysisText
     const start = raw.indexOf('{')
     const end = raw.lastIndexOf('}')
     if (start !== -1 && end !== -1) {
       const parsed = JSON.parse(raw.slice(start, end + 1))
+      debugInfo.cardName = parsed.cardName || null
       const cardName = parsed.cardName
-      if (cardName) {
-        if (game === 'pokemon') {
-          const r = await fetch(`https://api.pokemontcg.io/v2/cards?q=name:"${encodeURIComponent(cardName)}"&pageSize=1&select=images`)
-          const d = await r.json()
-          officialImageUrl = d.data?.[0]?.images?.large || d.data?.[0]?.images?.small
-          if (!officialImageUrl) {
-            const r2 = await fetch(`https://api.pokemontcg.io/v2/cards?q=name:${encodeURIComponent(cardName)}*&pageSize=1&select=images`)
-            const d2 = await r2.json()
-            officialImageUrl = d2.data?.[0]?.images?.large || d2.data?.[0]?.images?.small
-          }
-        } else if (game === 'mtg') {
-          const r = await fetch(`https://api.scryfall.com/cards/named?fuzzy=${encodeURIComponent(cardName)}`)
-          const d = await r.json()
-          if (d.object !== 'error') officialImageUrl = d.image_uris?.large || d.image_uris?.normal
-        } else if (game === 'yugioh') {
-          const r = await fetch(`https://db.ygoprodeck.com/api/v7/cardinfo.php?fname=${encodeURIComponent(cardName)}`)
-          const d = await r.json()
-          officialImageUrl = d.data?.[0]?.card_images?.[0]?.image_url || null
+      if (cardName && game === 'pokemon') {
+        const r = await fetch(`https://api.pokemontcg.io/v2/cards?q=name:"${encodeURIComponent(cardName)}"&pageSize=1&select=images`)
+        debugInfo.apiStatus = r.status
+        const d = await r.json()
+        debugInfo.apiResult = d.totalCount ?? d.data?.length ?? 'no data field'
+        officialImageUrl = d.data?.[0]?.images?.large || d.data?.[0]?.images?.small
+        if (!officialImageUrl) {
+          const r2 = await fetch(`https://api.pokemontcg.io/v2/cards?q=name:${encodeURIComponent(cardName)}*&pageSize=1&select=images`)
+          const d2 = await r2.json()
+          officialImageUrl = d2.data?.[0]?.images?.large || d2.data?.[0]?.images?.small
         }
       }
     }
   } catch (e) {
-    console.error('Image lookup error:', e.message)
+    debugInfo.error = e.message
   }
 
   // Log scan i Supabase
@@ -189,7 +183,7 @@ export default async function handler(req) {
     body: JSON.stringify({ total_scans: (profile.total_scans || 0) + 1 })
   })
 
-  return new Response(JSON.stringify({ analysis: analysisText, officialImageUrl }), {
+  return new Response(JSON.stringify({ analysis: analysisText, officialImageUrl, debugInfo }), {
     headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
   })
 }

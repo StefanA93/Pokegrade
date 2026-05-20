@@ -345,6 +345,8 @@ function ScanScreen({ user, profile, onScanDone }) {
       const start = raw.indexOf('{')
       const end = raw.lastIndexOf('}')
       const parsed = JSON.parse(raw.slice(start, end + 1))
+      console.log('DEBUG:', data.debugInfo)
+      alert(`Kortnavn: ${data.debugInfo?.cardName}\nAPI status: ${data.debugInfo?.apiStatus}\nResultater: ${data.debugInfo?.apiResult}\nFejl: ${data.debugInfo?.error}`)
       setResult({ ...parsed, officialImageUrl: data.officialImageUrl || null })
       onScanDone()
     } catch (err) {
