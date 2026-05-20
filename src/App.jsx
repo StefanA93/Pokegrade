@@ -409,22 +409,24 @@ function GradeResult({ result, game, frontImg, user, onSave }) {
 
   async function save() {
     setSaving(true)
-    try {
-      const valueStr = result.estimatedPSAValue || ''
-      const valueNum = parseFloat(valueStr.replace(/[^0-9.]/g, '')) || null
-      await supabase.from('cards').insert({
-        user_id: user.id,
-        name: result.cardName || 'Ukendt kort',
-        game,
-        grade: result.estimatedGrade,
-        value: valueNum,
-        notes: result.recommendation,
-      })
-      setSaved(true)
-      setTimeout(onSave, 800)
-    } catch {
-      alert('Kunne ikke gemme kortet — prøv igen.')
+    const valueStr = result.estimatedPSAValue || ''
+    const valueNum = parseFloat(valueStr.replace(/[^0-9.]/g, '')) || null
+    const { error } = await supabase.from('cards').insert({
+      user_id: user.id,
+      name: result.cardName || 'Ukendt kort',
+      game,
+      grade: result.estimatedGrade,
+      value: valueNum,
+      notes: result.recommendation,
+    })
+    if (error) {
+      console.error('Save error:', error)
+      alert(`Fejl: ${error.message}`)
+      setSaving(false)
+      return
     }
+    setSaved(true)
+    setTimeout(onSave, 800)
     setSaving(false)
   }
 
@@ -507,7 +509,8 @@ function CollectionScreen({ user }) {
 
   async function loadCards() {
     setLoading(true)
-    const { data } = await supabase.from('cards').select('*').eq('user_id', user.id).order('created_at', { ascending: false })
+    const { data, error } = await supabase.from('cards').select('*').eq('user_id', user.id).order('created_at', { ascending: false })
+    if (error) console.error('loadCards error:', error)
     setCards(data || [])
     setLoading(false)
   }
