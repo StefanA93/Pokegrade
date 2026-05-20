@@ -397,13 +397,36 @@ function ScanScreen({ user, profile, onScanDone }) {
       </Btn>
 
       {/* Result */}
-      {result && <GradeResult result={result} game={game} frontImg={frontImg} onSave={() => {}} />}
+      {result && <GradeResult result={result} game={game} frontImg={frontImg} user={user} onSave={() => { setResult(null); setFrontImg(null); setBackImg(null); onScanDone() }} />}
     </div>
   )
 }
 
-function GradeResult({ result, game, frontImg, onSave }) {
+function GradeResult({ result, game, frontImg, user, onSave }) {
   const gradeColor = result.estimatedGrade >= 9 ? COLORS.success : result.estimatedGrade >= 7 ? COLORS.gold : result.estimatedGrade >= 5 ? '#e67e22' : COLORS.danger
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+
+  async function save() {
+    setSaving(true)
+    try {
+      const valueStr = result.estimatedPSAValue || ''
+      const valueNum = parseFloat(valueStr.replace(/[^0-9.]/g, '')) || null
+      await supabase.from('cards').insert({
+        user_id: user.id,
+        name: result.cardName || 'Ukendt kort',
+        game,
+        grade: result.estimatedGrade,
+        value: valueNum,
+        notes: result.recommendation,
+      })
+      setSaved(true)
+      setTimeout(onSave, 800)
+    } catch {
+      alert('Kunne ikke gemme kortet — prøv igen.')
+    }
+    setSaving(false)
+  }
 
   function share() {
     if (navigator.share) {
@@ -461,7 +484,9 @@ function GradeResult({ result, game, frontImg, onSave }) {
       </div>
 
       <div style={{ display: 'flex', gap: 10 }}>
-        <Btn onClick={onSave} small style={{ flex: 1 }}>💾 Gem i samling</Btn>
+        <Btn onClick={save} disabled={saving || saved} small style={{ flex: 1 }}>
+          {saved ? '✅ Gemt!' : saving ? <Spinner size={16} color="#0a0a12" /> : '💾 Gem i samling'}
+        </Btn>
         <Btn onClick={share} variant="ghost" small style={{ flex: 1 }}>📤 Del</Btn>
       </div>
     </Card>
