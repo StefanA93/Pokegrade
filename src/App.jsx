@@ -236,29 +236,10 @@ function AuthScreen({ onAuth }) {
 // OFFICIAL CARD IMAGE LOOKUP
 async function fetchOfficialImage(game, cardName) {
   if (!cardName) return null
-  const name = cardName.trim()
   try {
-    if (game === 'pokemon') {
-      // Prøv eksakt match først, derefter fuzzy
-      const exact = await fetch(`https://api.pokemontcg.io/v2/cards?q=name:"${encodeURIComponent(name)}"&pageSize=1&select=images,name`)
-      const exactData = await exact.json()
-      if (exactData.data?.[0]?.images?.large) return exactData.data[0].images.large
-      // Fuzzy fallback
-      const fuzzy = await fetch(`https://api.pokemontcg.io/v2/cards?q=name:${encodeURIComponent(name)}*&pageSize=1&select=images,name`)
-      const fuzzyData = await fuzzy.json()
-      return fuzzyData.data?.[0]?.images?.large || fuzzyData.data?.[0]?.images?.small || null
-    }
-    if (game === 'mtg') {
-      const res = await fetch(`https://api.scryfall.com/cards/named?fuzzy=${encodeURIComponent(name)}`)
-      const data = await res.json()
-      if (data.object === 'error') return null
-      return data.image_uris?.large || data.image_uris?.normal || data.card_faces?.[0]?.image_uris?.normal || null
-    }
-    if (game === 'yugioh') {
-      const res = await fetch(`https://db.ygoprodeck.com/api/v7/cardinfo.php?fname=${encodeURIComponent(name)}`)
-      const data = await res.json()
-      return data.data?.[0]?.card_images?.[0]?.image_url_cropped || null
-    }
+    const res = await fetch(`/api/cardimage?game=${encodeURIComponent(game)}&name=${encodeURIComponent(cardName.trim())}`)
+    const data = await res.json()
+    return data.url || null
   } catch (e) { console.warn('fetchOfficialImage fejl:', e) }
   return null
 }
