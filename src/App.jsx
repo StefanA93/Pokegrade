@@ -261,9 +261,8 @@ function Onboarding({ onDone }) {
   return (
     <div style={{ height: '100dvh', display: 'flex', flexDirection: 'column', background: COLORS.bg, overflow: 'hidden' }}>
 
-      {/* Header: logo + skip */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '24px 24px 0' }}>
-        <GradeDexLogo size="sm" />
+      {/* Header: skip only */}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', padding: '24px 24px 0' }}>
         {idx < SLIDES.length - 1 && (
           <button onClick={onDone} style={{ color: COLORS.muted, fontSize: 13, fontWeight: 600, padding: '6px 12px', background: COLORS.card, borderRadius: 8, border: `1px solid ${COLORS.border}` }}>
             Spring over
@@ -1244,6 +1243,13 @@ export default function App() {
     const style = document.createElement('style')
     style.textContent = globalStyle
     document.head.appendChild(style)
+
+    // Hand off from HTML splash to React splash seamlessly
+    const htmlSplash = document.getElementById('splash')
+    if (htmlSplash) {
+      htmlSplash.classList.add('hidden')
+      setTimeout(() => htmlSplash.remove(), 400)
+    }
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, sess) => {
       setSession(sess)
