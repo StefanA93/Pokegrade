@@ -35,54 +35,65 @@ const COLORS = {
 // ─── Logo Component ───────────────────────────────────────────────────────────
 function GradeDexLogo({ size = 'md' }) {
   const s = size === 'lg' ? 1.4 : size === 'sm' ? 0.7 : 1
+  const ringSize = 100 * s
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 * s, userSelect: 'none' }}>
-      {/* Ring + G */}
-      <div style={{ position: 'relative', width: 100 * s, height: 100 * s }}>
-        {/* Glow */}
+      {/* Ring + G + speed lines */}
+      <div style={{ position: 'relative', width: ringSize + 24 * s, height: ringSize, display: 'flex', alignItems: 'center' }}>
+        {/* Outer glow */}
         <div style={{
-          position: 'absolute', inset: -8 * s, borderRadius: '50%',
-          boxShadow: `0 0 ${40 * s}px ${COLORS.gold}55, 0 0 ${80 * s}px ${COLORS.gold}22`,
+          position: 'absolute', left: 0, width: ringSize, height: ringSize,
+          borderRadius: '50%',
+          boxShadow: `0 0 ${30 * s}px ${COLORS.gold}44, 0 0 ${60 * s}px ${COLORS.gold}18`,
           pointerEvents: 'none',
         }} />
-        {/* Ring */}
+        {/* Ring circle */}
         <div style={{
-          position: 'absolute', inset: 0, borderRadius: '50%',
-          border: `${4 * s}px solid transparent`,
-          background: `linear-gradient(135deg, ${COLORS.goldLight}, ${COLORS.gold}, ${COLORS.goldDark}) border-box`,
-          WebkitMask: 'linear-gradient(#fff 0 0) padding-box, linear-gradient(#fff 0 0)',
-          WebkitMaskComposite: 'destination-out',
-          maskComposite: 'exclude',
-        }} />
+          width: ringSize, height: ringSize, borderRadius: '50%', flexShrink: 0,
+          border: `${4 * s}px solid ${COLORS.gold}`,
+          boxShadow: `inset 0 0 ${20 * s}px ${COLORS.goldDark}33`,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          background: `radial-gradient(circle at 35% 35%, ${COLORS.goldDark}22, transparent 60%)`,
+          position: 'relative',
+        }}>
+          {/* Shiny arc segment — top-right gap (speed effect) */}
+          <div style={{
+            position: 'absolute', inset: -4 * s, borderRadius: '50%',
+            border: `${4 * s}px solid transparent`,
+            borderTopColor: COLORS.goldLight,
+            borderRightColor: COLORS.goldLight,
+            transform: 'rotate(30deg)',
+          }} />
+          {/* G letter */}
+          <span style={{
+            fontSize: 44 * s, fontWeight: 900, color: '#fff',
+            lineHeight: 1, letterSpacing: -1,
+            textShadow: `0 0 ${20 * s}px rgba(255,255,255,0.3)`,
+          }}>G</span>
+        </div>
         {/* Speed lines */}
-        <div style={{ position: 'absolute', right: -18 * s, top: '50%', transform: 'translateY(-50%)', display: 'flex', flexDirection: 'column', gap: 4 * s }}>
-          {[18, 12, 8].map((w, i) => (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 5 * s, marginLeft: 6 * s }}>
+          {[[20, 1], [14, 0.7], [9, 0.4]].map(([w, op], i) => (
             <div key={i} style={{
               width: w * s, height: 2.5 * s, borderRadius: 2,
               background: `linear-gradient(to right, ${COLORS.gold}, transparent)`,
-              opacity: 1 - i * 0.2,
+              opacity: op,
             }} />
           ))}
         </div>
-        {/* G letter */}
-        <div style={{
-          position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: 44 * s, fontWeight: 900, color: '#fff',
-          fontFamily: 'system-ui, sans-serif', letterSpacing: -2,
-          textShadow: '0 2px 8px rgba(0,0,0,0.6)',
-          lineHeight: 1,
-        }}>G</div>
       </div>
+
       {/* Wordmark */}
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 0 }}>
-        <span style={{ fontSize: 28 * s, fontWeight: 900, color: '#fff', letterSpacing: -0.5, lineHeight: 1 }}>Grade</span>
-        <span style={{ fontSize: 28 * s, fontWeight: 900, color: COLORS.gold, letterSpacing: -0.5, lineHeight: 1 }}>Dex</span>
+      <div style={{ display: 'flex', alignItems: 'baseline' }}>
+        <span style={{ fontSize: 30 * s, fontWeight: 900, color: '#fff', letterSpacing: -0.5, lineHeight: 1 }}>Grade</span>
+        <span style={{ fontSize: 30 * s, fontWeight: 900, color: COLORS.gold, letterSpacing: -0.5, lineHeight: 1 }}>Dex</span>
       </div>
+
       {/* Tagline */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 * s }}>
         {['SCAN', 'GRADE', 'TRACK', 'COLLECT'].map((word, i, arr) => (
           <React.Fragment key={word}>
-            <span style={{ fontSize: 9 * s, fontWeight: 700, color: COLORS.muted, letterSpacing: 1.5, textTransform: 'uppercase' }}>{word}</span>
+            <span style={{ fontSize: 9 * s, fontWeight: 700, color: COLORS.muted, letterSpacing: 1.5 }}>{word}</span>
             {i < arr.length - 1 && <span style={{ color: COLORS.gold, fontSize: 8 * s }}>•</span>}
           </React.Fragment>
         ))}
