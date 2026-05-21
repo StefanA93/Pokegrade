@@ -261,15 +261,6 @@ function Onboarding({ onDone }) {
   return (
     <div style={{ height: '100dvh', display: 'flex', flexDirection: 'column', background: COLORS.bg, overflow: 'hidden' }}>
 
-      {/* Header: skip only */}
-      <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', padding: '24px 24px 0' }}>
-        {idx < SLIDES.length - 1 && (
-          <button onClick={onDone} style={{ color: COLORS.muted, fontSize: 13, fontWeight: 600, padding: '6px 12px', background: COLORS.card, borderRadius: 8, border: `1px solid ${COLORS.border}` }}>
-            Spring over
-          </button>
-        )}
-      </div>
-
       {/* Slide-indhold */}
       <div key={idx} className="slideUp" style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '0 32px', textAlign: 'center' }}>
         <div style={{
@@ -308,13 +299,18 @@ function Onboarding({ onDone }) {
             }} />
           ))}
         </div>
-        <div style={{ width: '100%', maxWidth: 360 }}>
+        <div style={{ width: '100%', maxWidth: 360, display: 'flex', flexDirection: 'column', gap: 12 }}>
           {slide.cta ? (
             <Btn onClick={onDone}>Kom i gang gratis</Btn>
           ) : (
-            <Btn onClick={() => setIdx(i => i + 1)} style={{ background: `linear-gradient(135deg, ${slide.accent}, ${slide.accent}cc)` }}>
-              Næste
-            </Btn>
+            <>
+              <Btn onClick={() => setIdx(i => i + 1)} style={{ background: `linear-gradient(135deg, ${slide.accent}, ${slide.accent}cc)` }}>
+                Næste
+              </Btn>
+              <button onClick={onDone} style={{ color: COLORS.muted, fontSize: 13, fontWeight: 600, textAlign: 'center', padding: '4px 0' }}>
+                Spring over
+              </button>
+            </>
           )}
         </div>
       </div>
