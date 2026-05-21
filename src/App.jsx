@@ -153,12 +153,17 @@ const globalStyle = `
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb { background: ${COLORS.border}; border-radius: 4px; }
   @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+  @keyframes fadeOut { from { opacity:1; } to { opacity:0; } }
   @keyframes spin { to { transform: rotate(360deg); } }
   @keyframes slideUp { from { opacity:0; transform:translateY(30px); } to { opacity:1; transform:none; } }
   @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.5; } }
   @keyframes gradeReveal { from { opacity:0; transform:scale(.6); } to { opacity:1; transform:scale(1); } }
   @keyframes shimmer { from { background-position: -200% 0; } to { background-position: 200% 0; } }
+  @keyframes splashEntrance { 0% { opacity:0; transform:scale(.75); } 60% { opacity:1; transform:scale(1.04); } 100% { opacity:1; transform:scale(1); } }
+  @keyframes glowPulse { 0%,100% { opacity:.4; transform:scale(1); } 50% { opacity:.8; transform:scale(1.12); } }
+  @keyframes sweepBar { 0% { transform:translateX(-100%); } 100% { transform:translateX(350%); } }
   .fadeIn { animation: fadeIn .3s ease both; }
+  .fadeOut { animation: fadeOut .4s ease both; }
   .slideUp { animation: slideUp .4s cubic-bezier(.34,1.56,.64,1) both; }
   .gradeReveal { animation: gradeReveal .5s cubic-bezier(.34,1.56,.64,1) both; }
   @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; } }
@@ -1231,6 +1236,8 @@ export default function App() {
   const [tab, setTab] = useState('scan')
   const [onboarded, setOnboarded] = useState(() => localStorage.getItem('gd_onboarded') === '1')
   const [loading, setLoading] = useState(true)
+  const [splashDone, setSplashDone] = useState(false)
+  const [splashFading, setSplashFading] = useState(false)
 
   useEffect(() => {
     // Inject global styles
@@ -1268,10 +1275,52 @@ export default function App() {
     if (sess) loadProfile(sess.user.id)
   }
 
-  if (loading) return (
-    <div style={{ height: '100dvh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: COLORS.bg, gap: 40 }}>
-      <GradeDexLogo size="lg" />
-      <Spinner size={28} />
+  useEffect(() => {
+    const minTimer = setTimeout(() => setSplashDone(true), 1800)
+    return () => clearTimeout(minTimer)
+  }, [])
+
+  const showSplash = loading || !splashDone
+
+  useEffect(() => {
+    if (!loading && splashDone && !splashFading) {
+      setSplashFading(true)
+    }
+  }, [loading, splashDone])
+
+  if (showSplash || splashFading) return (
+    <div style={{
+      height: '100dvh', display: 'flex', flexDirection: 'column',
+      alignItems: 'center', justifyContent: 'center',
+      background: COLORS.bg, position: 'relative', overflow: 'hidden',
+      animation: splashFading ? 'fadeOut .4s ease both' : 'none',
+    }}
+      onAnimationEnd={() => setSplashFading(false)}
+    >
+      {/* Baggrundsglow */}
+      <div style={{
+        position: 'absolute', width: 320, height: 320, borderRadius: '50%',
+        background: `radial-gradient(circle, ${COLORS.gold}18 0%, transparent 70%)`,
+        animation: 'glowPulse 2.5s ease-in-out infinite',
+        pointerEvents: 'none',
+      }} />
+
+      {/* Logo med splash-animation */}
+      <div style={{ animation: 'splashEntrance .7s cubic-bezier(.34,1.4,.64,1) both', position: 'relative', zIndex: 1 }}>
+        <GradeDexLogo size="lg" />
+      </div>
+
+      {/* Shimmer-bar */}
+      <div style={{
+        position: 'absolute', bottom: 60, width: 140, height: 2,
+        background: COLORS.border, borderRadius: 2, overflow: 'hidden',
+      }}>
+        <div style={{
+          width: '35%', height: '100%', borderRadius: 2,
+          background: `linear-gradient(to right, transparent, ${COLORS.gold}, transparent)`,
+          animation: 'sweepBar 1.4s ease-in-out infinite',
+        }} />
+      </div>
     </div>
   )
 
