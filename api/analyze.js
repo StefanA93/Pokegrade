@@ -87,12 +87,24 @@ export default async function handler(req) {
     return new Response(JSON.stringify({ error: 'Invalid JSON' }), { status: 400 })
   }
 
-  const { frontImage, backImage, game } = body
-  if (!frontImage) {
-    return new Response(JSON.stringify({ error: 'frontImage er påkrævet' }), { status: 400 })
+  const VALID_GAMES = ['pokemon', 'mtg', 'yugioh', 'onepiece', 'dragonball', 'lorcana']
+  const game = VALID_GAMES.includes(body.game) ? body.game : 'pokemon'
+  const { frontImage, backImage } = body
+
+  const MAX_IMAGE_BYTES = 5 * 1024 * 1024
+  function isValidImage(dataUrl) {
+    if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/')) return false
+    const base64 = dataUrl.replace(/^data:image\/\w+;base64,/, '')
+    return Math.ceil(base64.length * 0.75) <= MAX_IMAGE_BYTES
   }
 
-  // Kald Claude Haiku (hardcodet — kan ikke overrides)
+  if (!frontImage || !isValidImage(frontImage)) {
+    return new Response(JSON.stringify({ error: 'Ugyldigt eller manglende billede (maks 5 MB)' }), { status: 400 })
+  }
+  if (backImage && !isValidImage(backImage)) {
+    return new Response(JSON.stringify({ error: 'Bagbillede ugyldigt (maks 5 MB)' }), { status: 400 })
+  }
+
   const prompt = buildPrompt(game, !!backImage)
   const messages = [
     {
@@ -115,7 +127,7 @@ export default async function handler(req) {
         'content-type': 'application/json'
       },
       body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
+        model: 'claude-haiku-4-5',
         max_tokens: 1024,
         messages
       })
@@ -205,7 +217,12 @@ export default async function handler(req) {
     body: JSON.stringify({ total_scans: (profile.total_scans || 0) + 1 })
   })
 
-  return new Response(JSON.stringify({ analysis: analysisText, officialImageUrl, debugInfo }), {
+  const isDev = process.env.VERCEL_ENV === 'development'
+  return new Response(JSON.stringify({
+    analysis: analysisText,
+    officialImageUrl,
+    ...(isDev ? { debugInfo } : {}),
+  }), {
     headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
   })
 }
