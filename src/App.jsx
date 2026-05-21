@@ -20,15 +20,75 @@ const GAMES = [
 const STRIPE_URL = 'https://buy.stripe.com/REPLACE_WITH_YOUR_STRIPE_LINK'
 
 const COLORS = {
-  bg: '#0a0a12',
-  card: '#13131f',
-  border: '#1e1e2e',
-  gold: '#e8c56d',
-  goldDark: '#c9963a',
+  bg: '#080808',
+  card: '#101010',
+  border: '#1c1c1c',
+  gold: '#F5B429',
+  goldDark: '#C87800',
+  goldLight: '#FFD966',
   text: '#ffffff',
-  muted: '#8888aa',
+  muted: '#707080',
   danger: '#e74c3c',
   success: '#00b894',
+}
+
+// ─── Logo Component ───────────────────────────────────────────────────────────
+function GradeDexLogo({ size = 'md' }) {
+  const s = size === 'lg' ? 1.4 : size === 'sm' ? 0.7 : 1
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 * s, userSelect: 'none' }}>
+      {/* Ring + G */}
+      <div style={{ position: 'relative', width: 100 * s, height: 100 * s }}>
+        {/* Glow */}
+        <div style={{
+          position: 'absolute', inset: -8 * s, borderRadius: '50%',
+          boxShadow: `0 0 ${40 * s}px ${COLORS.gold}55, 0 0 ${80 * s}px ${COLORS.gold}22`,
+          pointerEvents: 'none',
+        }} />
+        {/* Ring */}
+        <div style={{
+          position: 'absolute', inset: 0, borderRadius: '50%',
+          border: `${4 * s}px solid transparent`,
+          background: `linear-gradient(135deg, ${COLORS.goldLight}, ${COLORS.gold}, ${COLORS.goldDark}) border-box`,
+          WebkitMask: 'linear-gradient(#fff 0 0) padding-box, linear-gradient(#fff 0 0)',
+          WebkitMaskComposite: 'destination-out',
+          maskComposite: 'exclude',
+        }} />
+        {/* Speed lines */}
+        <div style={{ position: 'absolute', right: -18 * s, top: '50%', transform: 'translateY(-50%)', display: 'flex', flexDirection: 'column', gap: 4 * s }}>
+          {[18, 12, 8].map((w, i) => (
+            <div key={i} style={{
+              width: w * s, height: 2.5 * s, borderRadius: 2,
+              background: `linear-gradient(to right, ${COLORS.gold}, transparent)`,
+              opacity: 1 - i * 0.2,
+            }} />
+          ))}
+        </div>
+        {/* G letter */}
+        <div style={{
+          position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: 44 * s, fontWeight: 900, color: '#fff',
+          fontFamily: 'system-ui, sans-serif', letterSpacing: -2,
+          textShadow: '0 2px 8px rgba(0,0,0,0.6)',
+          lineHeight: 1,
+        }}>G</div>
+      </div>
+      {/* Wordmark */}
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 0 }}>
+        <span style={{ fontSize: 28 * s, fontWeight: 900, color: '#fff', letterSpacing: -0.5, lineHeight: 1 }}>Grade</span>
+        <span style={{ fontSize: 28 * s, fontWeight: 900, color: COLORS.gold, letterSpacing: -0.5, lineHeight: 1 }}>Dex</span>
+      </div>
+      {/* Tagline */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 * s }}>
+        {['SCAN', 'GRADE', 'TRACK', 'COLLECT'].map((word, i, arr) => (
+          <React.Fragment key={word}>
+            <span style={{ fontSize: 9 * s, fontWeight: 700, color: COLORS.muted, letterSpacing: 1.5, textTransform: 'uppercase' }}>{word}</span>
+            {i < arr.length - 1 && <span style={{ color: COLORS.gold, fontSize: 8 * s }}>•</span>}
+          </React.Fragment>
+        ))}
+      </div>
+    </div>
+  )
 }
 
 // ─── Auth Context ─────────────────────────────────────────────────────────────
@@ -70,6 +130,11 @@ const globalStyle = `
     font-family: 'DM Sans', system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
     overscroll-behavior: none;
+  }
+  :root {
+    --gold: ${COLORS.gold};
+    --gold-dark: ${COLORS.goldDark};
+    --gold-light: ${COLORS.goldLight};
   }
   button { cursor: pointer; border: none; background: none; color: inherit; font-family: inherit; }
   input, textarea { font-family: inherit; }
@@ -280,10 +345,9 @@ function AuthScreen({ onAuth }) {
   return (
     <div style={{ height: '100dvh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
       <div className="fadeIn" style={{ width: '100%', maxWidth: 380, display: 'flex', flexDirection: 'column', gap: 24 }}>
-        <div style={{ textAlign: 'center' }}>
-          <div style={{ fontSize: 48, marginBottom: 8 }}>🃏</div>
-          <h1 style={{ fontSize: 28, fontWeight: 900, color: COLORS.gold }}>GradeDex EU</h1>
-          <p style={{ color: COLORS.muted, marginTop: 4 }}>{mode === 'login' ? 'Log ind på din konto' : 'Opret gratis konto'}</p>
+        <div style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
+          <GradeDexLogo size="md" />
+          <p style={{ color: COLORS.muted, fontSize: 14, marginTop: 4 }}>{mode === 'login' ? 'Log ind på din konto' : 'Opret gratis konto'}</p>
         </div>
         <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <input style={inp} type="email" placeholder="E-mail" value={email} onChange={e => setEmail(e.target.value)} required />
@@ -1199,8 +1263,9 @@ export default function App() {
   }
 
   if (loading) return (
-    <div style={{ height: '100dvh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: COLORS.bg }}>
-      <Spinner size={40} />
+    <div style={{ height: '100dvh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: COLORS.bg, gap: 40 }}>
+      <GradeDexLogo size="lg" />
+      <Spinner size={28} />
     </div>
   )
 
