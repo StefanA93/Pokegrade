@@ -255,65 +255,60 @@ function Onboarding({ onDone }) {
 
   return (
     <div style={{ height: '100dvh', display: 'flex', flexDirection: 'column', background: COLORS.bg, overflow: 'hidden' }}>
-      {/* Spring over øverst til højre */}
-      {idx < SLIDES.length - 1 && (
-        <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '20px 24px 0' }}>
-          <button onClick={onDone} style={{ color: COLORS.muted, fontSize: 14, fontWeight: 600, padding: '6px 12px' }}>
+
+      {/* Header: logo + skip */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '24px 24px 0' }}>
+        <GradeDexLogo size="sm" />
+        {idx < SLIDES.length - 1 && (
+          <button onClick={onDone} style={{ color: COLORS.muted, fontSize: 13, fontWeight: 600, padding: '6px 12px', background: COLORS.card, borderRadius: 8, border: `1px solid ${COLORS.border}` }}>
             Spring over
           </button>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* Slide-indhold */}
-      <div key={idx} className="slideUp" style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '0 32px', textAlign: 'center', gap: 0 }}>
-        {/* Stor emoji med baggrundscirkel i slide-farven */}
+      <div key={idx} className="slideUp" style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '0 32px', textAlign: 'center' }}>
         <div style={{
-          width: 140, height: 140, borderRadius: '50%',
-          background: slide.accent + '15',
-          border: `1.5px solid ${slide.accent}33`,
+          width: 110, height: 110, borderRadius: '50%',
+          background: slide.accent + '18',
+          border: `1.5px solid ${slide.accent}40`,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: 68, marginBottom: 32,
-          boxShadow: `0 0 60px ${slide.accent}20`,
+          fontSize: 52, marginBottom: 28,
+          boxShadow: `0 0 50px ${slide.accent}25`,
         }}>
           {slide.emoji}
         </div>
 
-        <h2 style={{ fontSize: 30, fontWeight: 900, letterSpacing: -0.5, marginBottom: 16, lineHeight: 1.15 }}>
+        <h2 style={{ fontSize: 26, fontWeight: 900, letterSpacing: -0.5, marginBottom: 12, lineHeight: 1.2, color: COLORS.text }}>
           {slide.title}
         </h2>
-        <p style={{ color: COLORS.muted, fontSize: 16, lineHeight: 1.65, maxWidth: 300, marginBottom: 16 }}>
+        <p style={{ color: COLORS.muted, fontSize: 15, lineHeight: 1.6, maxWidth: 290, marginBottom: 16 }}>
           {slide.desc}
         </p>
         {slide.detail && (
-          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: slide.accent + '15', border: `1px solid ${slide.accent}30`, borderRadius: 20, padding: '6px 14px' }}>
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: slide.accent + '15', border: `1px solid ${slide.accent}35`, borderRadius: 20, padding: '6px 14px' }}>
             <span style={{ fontSize: 12, color: slide.accent, fontWeight: 600 }}>{slide.detail}</span>
           </div>
         )}
       </div>
 
       {/* Dot-navigation + knap */}
-      <div style={{ padding: '0 32px 40px', display: 'flex', flexDirection: 'column', gap: 16, alignItems: 'center' }}>
+      <div style={{ padding: '0 32px 44px', display: 'flex', flexDirection: 'column', gap: 16, alignItems: 'center' }}>
         <div style={{ display: 'flex', gap: 6 }}>
           {SLIDES.map((_, i) => (
-            <button
-              key={i}
-              onClick={() => setIdx(i)}
-              aria-label={`Slide ${i + 1}`}
-              style={{
-                width: i === idx ? 28 : 8, height: 8, borderRadius: 4,
-                background: i === idx ? slide.accent : COLORS.border,
-                transition: 'all .3s cubic-bezier(.34,1.56,.64,1)',
-                border: 'none', cursor: 'pointer', padding: 0,
-              }}
-            />
+            <button key={i} onClick={() => setIdx(i)} aria-label={`Slide ${i + 1}`} style={{
+              width: i === idx ? 28 : 8, height: 8, borderRadius: 4,
+              background: i === idx ? slide.accent : COLORS.border,
+              transition: 'all .3s cubic-bezier(.34,1.56,.64,1)',
+              border: 'none', cursor: 'pointer', padding: 0,
+            }} />
           ))}
         </div>
-
         <div style={{ width: '100%', maxWidth: 360 }}>
           {slide.cta ? (
             <Btn onClick={onDone}>Kom i gang gratis</Btn>
           ) : (
-            <Btn onClick={() => setIdx(i => i + 1)} style={{ background: `linear-gradient(135deg, ${slide.accent}, ${slide.accent}bb)` }}>
+            <Btn onClick={() => setIdx(i => i + 1)} style={{ background: `linear-gradient(135deg, ${slide.accent}, ${slide.accent}cc)` }}>
               Næste
             </Btn>
           )}
