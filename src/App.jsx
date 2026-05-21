@@ -233,17 +233,6 @@ function AuthScreen({ onAuth }) {
   )
 }
 
-// OFFICIAL CARD IMAGE LOOKUP
-async function fetchOfficialImage(game, cardName) {
-  if (!cardName) return null
-  try {
-    const res = await fetch(`/api/cardimage?game=${encodeURIComponent(game)}&name=${encodeURIComponent(cardName.trim())}`)
-    const data = await res.json()
-    return data.url || null
-  } catch (e) { console.warn('fetchOfficialImage fejl:', e) }
-  return null
-}
-
 // CAMERA MODAL
 function CameraModal({ onCapture, onClose }) {
   const videoRef = useRef()
@@ -345,8 +334,6 @@ function ScanScreen({ user, profile, onScanDone }) {
       const start = raw.indexOf('{')
       const end = raw.lastIndexOf('}')
       const parsed = JSON.parse(raw.slice(start, end + 1))
-      console.log('DEBUG:', data.debugInfo)
-      alert(`Kortnavn: ${data.debugInfo?.cardName}\nAPI status: ${data.debugInfo?.apiStatus}\nResultater: ${data.debugInfo?.apiResult}\nFejl: ${data.debugInfo?.error}`)
       setResult({ ...parsed, officialImageUrl: data.officialImageUrl || null })
       onScanDone()
     } catch (err) {

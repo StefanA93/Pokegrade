@@ -145,16 +145,38 @@ export default async function handler(req) {
       debugInfo.cardName = parsed.cardName || null
       const cardName = parsed.cardName
       if (cardName && game === 'pokemon') {
-        const r = await fetch(`https://api.pokemontcg.io/v2/cards?q=name:"${encodeURIComponent(cardName)}"&pageSize=1&select=images`)
-        debugInfo.apiStatus = r.status
-        const d = await r.json()
-        debugInfo.apiResult = d.totalCount ?? d.data?.length ?? 'no data field'
-        officialImageUrl = d.data?.[0]?.images?.large || d.data?.[0]?.images?.small
-        if (!officialImageUrl) {
-          const r2 = await fetch(`https://api.pokemontcg.io/v2/cards?q=name:${encodeURIComponent(cardName)}*&pageSize=1&select=images`)
-          const d2 = await r2.json()
-          officialImageUrl = d2.data?.[0]?.images?.large || d2.data?.[0]?.images?.small
+        const cardNumber = parsed.cardNumber || null
+        const setName = parsed.setName || null
+
+        // Prøv eksakt match med kortnummer
+        if (cardNumber) {
+          const num = cardNumber.split('/')[0]
+          const r = await fetch(`https://api.pokemontcg.io/v2/cards?q=name:"${encodeURIComponent(cardName)}" number:${num}&pageSize=1&select=images`)
+          const d = await r.json()
+          officialImageUrl = d.data?.[0]?.images?.large || d.data?.[0]?.images?.small
         }
+
+        // Fallback: søg med sætnavn
+        if (!officialImageUrl && setName) {
+          const r = await fetch(`https://api.pokemontcg.io/v2/cards?q=name:"${encodeURIComponent(cardName)}" set.name:"${encodeURIComponent(setName)}"&pageSize=1&select=images`)
+          const d = await r.json()
+          officialImageUrl = d.data?.[0]?.images?.large || d.data?.[0]?.images?.small
+        }
+
+        // Fallback: kun navn
+        if (!officialImageUrl) {
+          const r = await fetch(`https://api.pokemontcg.io/v2/cards?q=name:"${encodeURIComponent(cardName)}"&pageSize=1&select=images`)
+          const d = await r.json()
+          officialImageUrl = d.data?.[0]?.images?.large || d.data?.[0]?.images?.small
+        }
+      } else if (game === 'mtg' && cardName) {
+        const r = await fetch(`https://api.scryfall.com/cards/named?fuzzy=${encodeURIComponent(cardName)}`)
+        const d = await r.json()
+        if (d.object !== 'error') officialImageUrl = d.image_uris?.large || d.image_uris?.normal
+      } else if (game === 'yugioh' && cardName) {
+        const r = await fetch(`https://db.ygoprodeck.com/api/v7/cardinfo.php?fname=${encodeURIComponent(cardName)}`)
+        const d = await r.json()
+        officialImageUrl = d.data?.[0]?.card_images?.[0]?.image_url || null
       }
     }
   } catch (e) {
@@ -203,7 +225,9 @@ function buildPrompt(game, hasBack) {
 
 Returner KUN dette JSON-objekt — ingen tekst før eller efter, ingen markdown, ingen kodeblokke:
 {
-  "cardName": "<kortets navn som vist på kortet>",
+  "cardName": "<kortets navn præcis som vist på kortet>",
+  "cardNumber": "<kortnummer f.eks. 45/165 eller blot 45 — null hvis ikke synligt>",
+  "setName": "<sætnavn f.eks. Obsidian Flames eller Base Set — null hvis ukendt>",
   "estimatedGrade": <tal 1-10>,
   "confidence": "<Høj|Middel|Lav>",
   "centering": "<beskrivelse>",
