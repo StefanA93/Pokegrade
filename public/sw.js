@@ -1,21 +1,18 @@
-// Cleanup SW: takes control immediately, wipes all caches,
-// then serves every navigation fresh from network and unregisters.
+// Cleanup SW: evicts all caches, claims clients, then self-destructs.
+// Kept alive so browsers with the old caching SW can receive this update.
+// Safe to delete after 60+ days with no cache complaints.
 self.addEventListener('install', () => self.skipWaiting())
 
 self.addEventListener('activate', event => {
   event.waitUntil(
-    self.clients.claim()
-      .then(() => caches.keys())
+    caches.keys()
       .then(keys => Promise.all(keys.map(k => caches.delete(k))))
-      .then(() => self.clients.matchAll({ type: 'window', includeUncontrolled: true }))
-      .then(clients => clients.forEach(c => c.navigate(c.url)))
+      .then(() => self.clients.claim())
+      .then(() => self.registration.unregister())
   )
 })
 
-// Intercept every navigation: serve fresh from network, then self-destruct
+// Pure network passthrough — no caching, no interception side-effects.
 self.addEventListener('fetch', event => {
-  if (event.request.mode === 'navigate') {
-    self.registration.unregister()
-    event.respondWith(fetch(event.request, { cache: 'no-store' }))
-  }
+  event.respondWith(fetch(event.request, { cache: 'no-store' }))
 })
