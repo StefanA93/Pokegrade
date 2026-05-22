@@ -1521,7 +1521,7 @@ function SettingsScreen({ user, profile, onSignOut }) {
 
 const GAME_LOGOS = {
   pokemon:    'https://upload.wikimedia.org/wikipedia/commons/1/1a/Pok%C3%A9mon_Trading_Card_Game_logo.svg',
-  mtg:        'https://upload.wikimedia.org/wikipedia/commons/3/3f/Magicthegathering-logo.svg',
+  mtg:        'https://images.ctfassets.net/s5n2t79q9icq/3dB5uyWzUH95O1ZPBNNUX5/6cff7c65a809285755ea24b164b6ac65/magic-logo.png',
   yugioh:     'https://upload.wikimedia.org/wikipedia/commons/2/21/Yu-Gi-Oh%21.png',
   onepiece:   'https://upload.wikimedia.org/wikipedia/commons/6/6c/One_piece_logo.svg',
   dragonball: 'https://upload.wikimedia.org/wikipedia/commons/d/d5/DBSlogo-01.png',
