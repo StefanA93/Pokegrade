@@ -173,38 +173,79 @@ export default async function handler(req) {
         }
         const fields = 'id,image_url,cardmarket_url,price_eur'
 
-        // Strategy 1: exact number + set match
-        if (cardNumber && setName) {
-          const num = cardNumber.split('/')[0]
-          const url = `${SUPABASE_URL}/rest/v1/card_catalog?game=eq.${encodeURIComponent(game)}&number=eq.${encodeURIComponent(num)}&set_name=ilike.${encodeURIComponent(`*${setName}*`)}&select=${fields}&limit=1`
-          const r = await fetch(url, { headers: catalogHeaders })
-          const rows = r.ok ? await r.json() : []
-          if (rows[0]) { catalogId = rows[0].id; officialImageUrl = rows[0].image_url; catalogPriceEur = rows[0].price_eur; catalogCardmarketUrl = rows[0].cardmarket_url; debugInfo.catalogHit = true }
+        // Build all number variants to try: "6", "06", "006", "SWSH006" etc.
+        function numVariants(raw) {
+          if (!raw) return []
+          const base = raw.split('/')[0].trim()
+          const digits = base.replace(/\D/g, '')
+          const prefix = base.replace(/\d.*/, '')
+          const n = parseInt(digits, 10)
+          if (isNaN(n)) return [base]
+          const variants = new Set([
+            base,
+            prefix + String(n),
+            prefix + String(n).padStart(2, '0'),
+            prefix + String(n).padStart(3, '0'),
+          ])
+          return [...variants]
         }
 
-        // Strategy 2: number only
-        if (!catalogId && cardNumber) {
-          const num = cardNumber.split('/')[0]
-          const url = `${SUPABASE_URL}/rest/v1/card_catalog?game=eq.${encodeURIComponent(game)}&number=eq.${encodeURIComponent(num)}&name=ilike.${encodeURIComponent(cardName)}&select=${fields}&limit=1`
+        async function tryFetch(url) {
           const r = await fetch(url, { headers: catalogHeaders })
-          const rows = r.ok ? await r.json() : []
-          if (rows[0]) { catalogId = rows[0].id; officialImageUrl = rows[0].image_url; catalogPriceEur = rows[0].price_eur; catalogCardmarketUrl = rows[0].cardmarket_url; debugInfo.catalogHit = true }
+          return r.ok ? await r.json() : []
         }
 
-        // Strategy 3: name + set
+        function applyHit(row) {
+          catalogId = row.id
+          officialImageUrl = row.image_url
+          catalogPriceEur = row.price_eur
+          catalogCardmarketUrl = row.cardmarket_url
+          debugInfo.catalogHit = true
+        }
+
+        const nums = numVariants(cardNumber)
+        const gameFilter = `game=eq.${encodeURIComponent(game)}`
+        const nameFilter = `name=ilike.${encodeURIComponent(cardName)}`
+
+        // Strategy 1: number variants + set name + card name
+        if (nums.length && setName) {
+          for (const num of nums) {
+            if (catalogId) break
+            const rows = await tryFetch(
+              `${SUPABASE_URL}/rest/v1/card_catalog?${gameFilter}&${nameFilter}&number=eq.${encodeURIComponent(num)}&set_name=ilike.${encodeURIComponent(`*${setName}*`)}&select=${fields}&limit=1`
+            )
+            if (rows[0]) applyHit(rows[0])
+          }
+        }
+
+        // Strategy 2: number variants + card name (no set filter)
+        if (!catalogId && nums.length) {
+          for (const num of nums) {
+            if (catalogId) break
+            const rows = await tryFetch(
+              `${SUPABASE_URL}/rest/v1/card_catalog?${gameFilter}&${nameFilter}&number=eq.${encodeURIComponent(num)}&select=${fields}&limit=1`
+            )
+            if (rows[0]) applyHit(rows[0])
+          }
+        }
+
+        // Strategy 3: name + set (no number)
         if (!catalogId && setName) {
-          const url = `${SUPABASE_URL}/rest/v1/card_catalog?game=eq.${encodeURIComponent(game)}&name=ilike.${encodeURIComponent(cardName)}&set_name=ilike.${encodeURIComponent(`*${setName}*`)}&select=${fields}&limit=1`
-          const r = await fetch(url, { headers: catalogHeaders })
-          const rows = r.ok ? await r.json() : []
-          if (rows[0]) { catalogId = rows[0].id; officialImageUrl = rows[0].image_url; catalogPriceEur = rows[0].price_eur; catalogCardmarketUrl = rows[0].cardmarket_url; debugInfo.catalogHit = true }
+          const rows = await tryFetch(
+            `${SUPABASE_URL}/rest/v1/card_catalog?${gameFilter}&${nameFilter}&set_name=ilike.${encodeURIComponent(`*${setName}*`)}&select=${fields}&limit=1`
+          )
+          if (rows[0]) applyHit(rows[0])
         }
 
-        // Strategy 4: name only
-        if (!catalogId && cardName) {
-          const url = `${SUPABASE_URL}/rest/v1/card_catalog?game=eq.${encodeURIComponent(game)}&name=ilike.${encodeURIComponent(cardName)}&select=${fields}&limit=1`
-          const r = await fetch(url, { headers: catalogHeaders })
-          const rows = r.ok ? await r.json() : []
-          if (rows[0]) { catalogId = rows[0].id; officialImageUrl = rows[0].image_url; catalogPriceEur = rows[0].price_eur; catalogCardmarketUrl = rows[0].cardmarket_url; debugInfo.catalogHit = true }
+        // Strategy 4: name + finish match (avoid wrong printing on name-only)
+        if (!catalogId) {
+          const parsed2 = JSON.parse(raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1))
+          const finish = parsed2.finish || null
+          const finishFilter = finish ? `&finish=ilike.${encodeURIComponent(`*${finish}*`)}` : ''
+          const rows = await tryFetch(
+            `${SUPABASE_URL}/rest/v1/card_catalog?${gameFilter}&${nameFilter}${finishFilter}&select=${fields}&order=price_eur.desc.nullslast&limit=1`
+          )
+          if (rows[0]) applyHit(rows[0])
         }
       }
     }
