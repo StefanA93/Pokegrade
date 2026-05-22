@@ -20,14 +20,15 @@ const GAMES = [
 const STRIPE_URL = 'https://buy.stripe.com/REPLACE_WITH_YOUR_STRIPE_LINK'
 
 const COLORS = {
-  bg: '#080808',
-  card: '#101010',
-  border: '#1c1c1c',
-  gold: '#F5B429',
-  goldDark: '#C87800',
-  goldLight: '#FFD966',
+  bg: '#06060a',
+  card: '#0d0d14',
+  border: '#1e1e28',
+  gold: '#D4AF37',
+  goldDark: '#B8960C',
+  goldLight: '#F4D06F',
+  goldGlow: '#FFE082',
   text: '#ffffff',
-  muted: '#707080',
+  muted: '#6b6b7d',
   danger: '#e74c3c',
   success: '#00b894',
 }
@@ -86,7 +87,7 @@ function GradeDexLogo({ size = 'md' }) {
       {/* Wordmark */}
       <div style={{ display: 'flex', alignItems: 'baseline' }}>
         <span style={{ fontSize: 30 * s, fontWeight: 900, color: '#fff', letterSpacing: -0.5, lineHeight: 1 }}>Grade</span>
-        <span style={{ fontSize: 30 * s, fontWeight: 900, color: COLORS.gold, letterSpacing: -0.5, lineHeight: 1 }}>Dex</span>
+        <span style={{ fontSize: 30 * s, fontWeight: 900, color: COLORS.gold, letterSpacing: -0.5, lineHeight: 1, textShadow: `0 0 20px ${COLORS.gold}60` }}>Dex</span>
       </div>
 
       {/* Tagline */}
@@ -136,7 +137,7 @@ const globalStyle = `
   * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
   html, body, #root { height: 100%; width: 100%; }
   body {
-    background: ${COLORS.bg};
+    background: linear-gradient(160deg, #06060a 0%, #090910 100%);
     color: ${COLORS.text};
     font-family: 'DM Sans', system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
@@ -147,6 +148,8 @@ const globalStyle = `
     --gold-dark: ${COLORS.goldDark};
     --gold-light: ${COLORS.goldLight};
   }
+  @keyframes goldShimmer { 0%,100% { opacity:0.6; } 50% { opacity:1; } }
+  .luxury-label { font-size: 10px; font-weight: 700; letter-spacing: 1.8px; text-transform: uppercase; color: #6b6b7d; }
   button { cursor: pointer; border: none; background: none; color: inherit; font-family: inherit; }
   input, textarea { font-family: inherit; }
   ::-webkit-scrollbar { width: 4px; }
@@ -189,8 +192,19 @@ function Btn({ children, onClick, variant = 'primary', disabled, style, small })
     opacity: disabled ? 0.5 : 1,
   }
   const variants = {
-    primary: { background: `linear-gradient(135deg, ${COLORS.gold}, ${COLORS.goldDark})`, color: '#0a0a12' },
-    ghost: { background: 'transparent', border: `1.5px solid ${COLORS.border}`, color: COLORS.text },
+    primary: {
+      background: `linear-gradient(135deg, #F4D06F 0%, #D4AF37 50%, #B8960C 100%)`,
+      color: '#060608',
+      boxShadow: '0 0 20px rgba(212,175,55,0.28), 0 4px 16px rgba(0,0,0,0.5)',
+      letterSpacing: 0.3,
+      fontWeight: 800,
+    },
+    ghost: {
+      background: 'transparent',
+      border: '1.5px solid #1e1e28',
+      color: '#ffffff',
+      boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04)',
+    },
     danger: { background: COLORS.danger + '22', border: `1px solid ${COLORS.danger}`, color: COLORS.danger },
   }
   return (
@@ -202,7 +216,13 @@ function Btn({ children, onClick, variant = 'primary', disabled, style, small })
 
 function Card({ children, style }) {
   return (
-    <div style={{ background: COLORS.card, borderRadius: 20, padding: 20, border: `1px solid ${COLORS.border}`, ...style }}>
+    <div style={{
+      background: 'linear-gradient(145deg, #0d0d14 0%, #0a0a10 100%)',
+      borderRadius: 20, padding: 20,
+      border: '1px solid #1e1e28',
+      boxShadow: '0 4px 24px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.03)',
+      ...style
+    }}>
       {children}
     </div>
   )
@@ -269,7 +289,7 @@ function Onboarding({ onDone }) {
           border: `1.5px solid ${slide.accent}40`,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           fontSize: 52, marginBottom: 28,
-          boxShadow: `0 0 50px ${slide.accent}25`,
+          boxShadow: `0 0 60px ${slide.accent}30, 0 4px 24px rgba(0,0,0,0.4)`,
         }}>
           {slide.emoji}
         </div>
@@ -346,7 +366,18 @@ function AuthScreen({ onAuth }) {
     }
   }
 
-  const inp = { background: COLORS.border, border: `1px solid ${COLORS.border}`, borderRadius: 12, padding: '14px 16px', color: COLORS.text, fontSize: 16, width: '100%', outline: 'none' }
+  const inp = {
+    background: 'linear-gradient(145deg, #0d0d14, #0a0a10)',
+    border: '1px solid #1e1e28',
+    borderRadius: 14,
+    padding: '14px 16px',
+    color: '#ffffff',
+    fontSize: 16,
+    width: '100%',
+    outline: 'none',
+    transition: 'border-color .2s',
+    boxShadow: 'inset 0 2px 8px rgba(0,0,0,0.3)',
+  }
 
   return (
     <div style={{ height: '100dvh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
@@ -905,10 +936,11 @@ function HomeScreen({ user, profile, onGoScan, onViewAll }) {
             onClick={() => setHomeTab(id)}
             style={{
               marginRight: 24, paddingBottom: 12, background: 'none', border: 'none',
-              borderBottom: homeTab === id ? `2px solid ${COLORS.gold}` : '2px solid transparent',
+              borderBottom: homeTab === id ? `2px solid #D4AF37` : '2px solid transparent',
               color: homeTab === id ? COLORS.text : COLORS.muted,
               fontWeight: homeTab === id ? 700 : 500, fontSize: 15,
               cursor: 'pointer', transition: 'all .15s', display: 'flex', alignItems: 'center', gap: 6,
+              textShadow: homeTab === id ? '0 0 12px rgba(212,175,55,0.3)' : 'none',
             }}
           >
             {label}
@@ -929,7 +961,7 @@ function HomeScreen({ user, profile, onGoScan, onViewAll }) {
 
         {/* Value hero row */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 6 }}>
-          <div style={{ fontSize: 40, fontWeight: 900, letterSpacing: -1.5, fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>
+          <div style={{ fontSize: 40, fontWeight: 900, letterSpacing: -1.5, fontVariantNumeric: 'tabular-nums', lineHeight: 1, textShadow: '0 0 30px rgba(212,175,55,0.15)' }}>
             {hideValue ? '••••• €' : (loading ? '—' : formatEur(displayValue))}
           </div>
           <button
@@ -970,7 +1002,8 @@ function HomeScreen({ user, profile, onGoScan, onViewAll }) {
               onClick={() => p !== 'MAX' && setPeriod(p)}
               style={{
                 padding: '6px 10px', borderRadius: 20, border: 'none',
-                background: period === p ? '#ffffff' : 'transparent',
+                background: period === p ? 'linear-gradient(135deg, #ffffff, #e8e8e0)' : 'transparent',
+                boxShadow: period === p ? '0 2px 8px rgba(0,0,0,0.4)' : 'none',
                 color: period === p ? '#080808' : COLORS.muted,
                 fontWeight: period === p ? 700 : 500, fontSize: 13,
                 cursor: p === 'MAX' ? 'default' : 'pointer',
@@ -989,7 +1022,7 @@ function HomeScreen({ user, profile, onGoScan, onViewAll }) {
         {/* Most valuable */}
         {!loading && topCards.length > 0 && (
           <div style={{ marginBottom: 24 }}>
-            <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 12 }}>Mest værdifulde</div>
+            <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 12, letterSpacing: 0.3, color: '#ffffff' }}>Mest værdifulde</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {topCards.map((card) => {
                 const game = GAMES.find(g => g.id === card.game)
@@ -999,9 +1032,10 @@ function HomeScreen({ user, profile, onGoScan, onViewAll }) {
                   <div key={card.id} style={{
                     display: 'flex', alignItems: 'center',
                     padding: '14px 16px',
-                    borderRadius: 14,
-                    background: COLORS.card,
-                    border: `1px solid ${COLORS.gold}33`,
+                    borderRadius: 16,
+                    background: 'linear-gradient(135deg, #0d0d14 0%, #0a0a10 100%)',
+                    border: '1px solid rgba(212,175,55,0.18)',
+                    boxShadow: '0 2px 16px rgba(0,0,0,0.35), inset 0 1px 0 rgba(212,175,55,0.04)',
                   }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontWeight: 700, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginBottom: 3 }}>
@@ -1024,7 +1058,7 @@ function HomeScreen({ user, profile, onGoScan, onViewAll }) {
                 )
               })}
             </div>
-            <button onClick={onViewAll} style={{ display: 'block', width: '100%', textAlign: 'center', marginTop: 14, color: COLORS.gold, fontWeight: 700, fontSize: 14, background: 'none', border: 'none', cursor: 'pointer' }}>
+            <button onClick={onViewAll} style={{ display: 'block', width: '100%', textAlign: 'center', marginTop: 14, color: '#D4AF37', fontWeight: 700, fontSize: 14, background: 'none', border: 'none', cursor: 'pointer', letterSpacing: 0.3, textShadow: '0 0 16px rgba(212,175,55,0.4)' }}>
               Se alle →
             </button>
           </div>
@@ -1656,15 +1690,15 @@ function BottomNav({ tab, setTab }) {
       bottom: `calc(12px + env(safe-area-inset-bottom))`,
       left: 16, right: 16,
       zIndex: 100,
-      background: 'rgba(12,12,12,0.82)',
+      background: 'rgba(7,7,12,0.90)',
       borderRadius: 32,
-      border: '1px solid rgba(255,255,255,0.07)',
+      border: '1px solid rgba(212,175,55,0.10)',
       display: 'flex',
       alignItems: 'center',
       padding: '6px 8px',
       backdropFilter: 'blur(28px)',
       WebkitBackdropFilter: 'blur(28px)',
-      boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
+      boxShadow: '0 8px 40px rgba(0,0,0,0.7), inset 0 1px 0 rgba(255,255,255,0.03)',
     }}>
       {tabs.map(t => {
         const isActive = tab === t.id
@@ -1685,7 +1719,8 @@ function BottomNav({ tab, setTab }) {
             <div style={{
               width: 44, height: 30, borderRadius: 15,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              background: isActive ? COLORS.gold + '20' : 'transparent',
+              background: isActive ? '#D4AF3722' : 'transparent',
+              boxShadow: isActive ? '0 0 10px rgba(212,175,55,0.20)' : 'none',
               transition: 'background .2s',
             }}>
               {t.icon(isActive)}
