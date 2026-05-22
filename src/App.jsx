@@ -599,7 +599,13 @@ function ScanScreen({ user, profile, onScanDone }) {
       const start = raw.indexOf('{')
       const end = raw.lastIndexOf('}')
       const parsed = JSON.parse(raw.slice(start, end + 1))
-      setResult({ ...parsed, officialImageUrl: data.officialImageUrl || null })
+      setResult({
+        ...parsed,
+        officialImageUrl: data.officialImageUrl || null,
+        catalogId: data.catalogId || null,
+        catalogPriceEur: data.catalogPriceEur || null,
+        catalogCardmarketUrl: data.catalogCardmarketUrl || null,
+      })
       onScanDone()
     } catch (err) {
       setError(err.message)
@@ -693,10 +699,11 @@ function GradeResult({ result, game, frontImg, user, onSave }) {
       })
     }
 
-    // Parse prisinterval — tag gennemsnittet af "40-65€" → 52
+    // Prefer catalog EUR price; fall back to parsing AI estimate string "40-65€" → avg
     const valueStr = result.estimatedPSAValue || ''
     const nums = [...valueStr.matchAll(/\d+/g)].map(m => parseFloat(m[0]))
-    const valueNum = nums.length >= 2 ? (nums[0] + nums[1]) / 2 : nums[0] || null
+    const parsedValueNum = nums.length >= 2 ? (nums[0] + nums[1]) / 2 : nums[0] || null
+    const valueNum = result.catalogPriceEur || parsedValueNum || null
 
     const { error } = await supabase.from('cards').insert({
       user_id: user.id,
@@ -708,6 +715,9 @@ function GradeResult({ result, game, frontImg, user, onSave }) {
       price_range: result.estimatedPSAValue || null,
       image_url: result.officialImageUrl || imageUrl,
       notes: result.recommendation,
+      card_number: result.cardNumber || null,
+      set_name: result.setName || null,
+      catalog_id: result.catalogId || null,
     })
     if (error) {
       setSaveError(error.message)
@@ -1111,7 +1121,7 @@ function HomeScreen({ user, profile, onGoScan, onViewAll }) {
                 const dailyChange = getDailyChange(card.id)
                 const changeColor = dailyChange >= 0 ? COLORS.success : COLORS.danger
                 const condition = getPsaCondition(card.grade)
-                const meta = [condition, card.finish, card.grade ? `AiGrade ${card.grade}` : null].filter(Boolean).join(' • ')
+                const meta = [card.set_name || condition, card.finish].filter(Boolean).join(' • ')
                 return (
                   <div key={card.id} style={{ padding: '8px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                     <div style={{ flex: 1, minWidth: 0, marginRight: 6 }}>
@@ -1209,6 +1219,13 @@ function CollectionScreen({ user, initialGame, onClearFilter }) {
   const [filterGame, setFilterGame] = useState(initialGame || 'all')
   const [sortBy, setSortBy] = useState('newest')
   const [dbError, setDbError] = useState('')
+  const [currency, setCurrency] = useState(() => localStorage.getItem('gradedex_currency') || 'EUR')
+
+  function fmtVal(val) {
+    if (!val && val !== 0) return '—'
+    const converted = val * (EXCHANGE_RATES[currency] ?? 1)
+    return new Intl.NumberFormat('da-DK', { style: 'currency', currency, maximumFractionDigits: 2 }).format(converted)
+  }
 
   useEffect(() => {
     loadCards()
@@ -1270,7 +1287,7 @@ function CollectionScreen({ user, initialGame, onClearFilter }) {
           <span style={{ fontSize: 13, color: COLORS.gold, fontWeight: 800 }}>My Collection</span>
         </div>
         <div style={{ fontSize: 36, fontWeight: 700, fontFamily: FONT_VALUE, letterSpacing: -0.5, fontVariantNumeric: 'tabular-nums' }}>
-          {formatEur(totalValue)}
+          {fmtVal(totalValue)}
         </div>
       </div>
 
@@ -1358,7 +1375,7 @@ function CollectionScreen({ user, initialGame, onClearFilter }) {
           </div>
         ) : (
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            {filtered.map(card => <CardItem key={card.id} card={card} onDelete={loadCards} />)}
+            {filtered.map(card => <CardItem key={card.id} card={card} onDelete={loadCards} fmtVal={fmtVal} currency={currency} />)}
           </div>
         )}
       </div>
@@ -1366,23 +1383,31 @@ function CollectionScreen({ user, initialGame, onClearFilter }) {
   )
 }
 
-function CardItem({ card, onDelete }) {
+function CardItem({ card, onDelete, fmtVal = formatEur, currency = 'EUR' }) {
   const game = GAMES.find(g => g.id === card.game)
-  const gradeColor = card.grade >= 9 ? COLORS.success : card.grade >= 7 ? COLORS.gold : card.grade >= 5 ? '#e67e22' : COLORS.danger
+  const conditionLabel = getPsaCondition(card.grade)
+  const conditionColor = getPsaConditionColor(card.grade)
+  const dailyChange = getDailyChange(card.id)
+  const changeColor = dailyChange >= 0 ? COLORS.success : COLORS.danger
   const [showDelete, setShowDelete] = useState(false)
+
+  const rate = EXCHANGE_RATES[currency] ?? 1
+  const displayValue = card.value ? card.value * rate : null
+  const absChange = displayValue ? Math.abs(displayValue * dailyChange / 100) : 0
+
+  function fmtAbs(val) {
+    if (!val && val !== 0) return '—'
+    return new Intl.NumberFormat('da-DK', { style: 'currency', currency, maximumFractionDigits: 2 }).format(val)
+  }
 
   async function deleteCard() {
     const { error } = await supabase.from('cards').delete().eq('id', card.id).eq('user_id', card.user_id)
     if (!error) onDelete()
   }
 
-  const conditionLabel = getPsaCondition(card.grade)
-  const dailyChange = getDailyChange(card.id)
-  const changeColor = dailyChange >= 0 ? COLORS.success : COLORS.danger
-
   return (
     <div className="fadeIn" style={{ position: 'relative' }}>
-      <div style={{ background: COLORS.card, borderRadius: 12, overflow: 'hidden', border: `1px solid ${COLORS.border}`, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ background: COLORS.card, borderRadius: 14, overflow: 'hidden', border: `1px solid ${COLORS.border}`, display: 'flex', flexDirection: 'column' }}>
 
         {/* Card image */}
         <div style={{ position: 'relative', aspectRatio: '3/4', background: COLORS.bg, overflow: 'hidden' }}>
@@ -1398,49 +1423,65 @@ function CardItem({ card, onDelete }) {
           {/* Options button */}
           <button
             onClick={() => setShowDelete(v => !v)}
-            style={{ position: 'absolute', top: 8, left: 8, width: 28, height: 28, borderRadius: 8, background: '#000a', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, border: 'none', cursor: 'pointer', color: '#fff' }}
+            style={{ position: 'absolute', top: 8, left: 8, width: 26, height: 26, borderRadius: 7, background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, border: 'none', cursor: 'pointer', color: '#fff', letterSpacing: 1 }}
             aria-label="Card options"
           >
             ···
           </button>
 
           {showDelete && (
-            <div className="fadeIn" style={{ position: 'absolute', inset: 0, background: '#000c', display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'center', justifyContent: 'center' }}>
-              <button onClick={deleteCard} style={{ background: COLORS.danger, color: '#fff', borderRadius: 10, padding: '10px 20px', fontWeight: 700, fontSize: 13, border: 'none', cursor: 'pointer' }}>Delete Card</button>
+            <div className="fadeIn" style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.78)', backdropFilter: 'blur(4px)', display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'center', justifyContent: 'center' }}>
+              <button onClick={deleteCard} style={{ background: COLORS.danger, color: '#fff', borderRadius: 10, padding: '10px 22px', fontWeight: 700, fontSize: 13, border: 'none', cursor: 'pointer' }}>Delete</button>
               <button onClick={() => setShowDelete(false)} style={{ color: COLORS.muted, fontSize: 13, background: 'none', border: 'none', cursor: 'pointer' }}>Cancel</button>
             </div>
           )}
         </div>
 
-        {/* Info */}
-        <div style={{ padding: '10px 10px 12px', display: 'flex', flexDirection: 'column', gap: 3 }}>
+        {/* Info section */}
+        <div style={{ padding: '10px 10px 11px', display: 'flex', flexDirection: 'column', gap: 3 }}>
 
-          {/* Kort navn */}
-          <div style={{ fontWeight: 700, fontSize: 12, lineHeight: 1.3, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', color: COLORS.text }}>
+          {/* Card name — large + bold */}
+          <div style={{ fontWeight: 800, fontSize: 13, lineHeight: 1.25, letterSpacing: -0.2, color: COLORS.text, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
             {card.name || 'Unknown Card'}
           </div>
 
-          {/* Spil + finish */}
-          <div style={{ fontSize: 10, color: COLORS.muted, fontWeight: 500 }}>
-            {game?.label}{card.finish ? ` • ${card.finish}` : ''}
+          {/* Set name or game label */}
+          <div style={{ fontSize: 10, color: COLORS.muted, fontWeight: 500, letterSpacing: 0.1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {card.set_name || game?.label || 'Trading Card'}
           </div>
 
-          {/* AiGrade + condition */}
-          <div style={{ fontSize: 10, color: COLORS.gold, fontWeight: 700 }}>
-            AiGrade {card.grade}{conditionLabel ? ` · ${conditionLabel}` : ''}
+          {/* Finish + card number */}
+          <div style={{ fontSize: 10, color: COLORS.muted, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {[card.finish, card.card_number].filter(Boolean).join(' • ') || '—'}
+          </div>
+
+          {/* Condition */}
+          <div style={{ fontSize: 10, fontWeight: 700, color: conditionColor, letterSpacing: 0.1 }}>
+            {conditionLabel || 'Near Mint'}
           </div>
 
           {/* Divider */}
-          <div style={{ height: 1, background: 'rgba(255,255,255,0.05)', margin: '4px 0' }} />
+          <div style={{ height: 1, background: 'rgba(255,255,255,0.055)', margin: '3px 0' }} />
 
-          {/* Pris + daglig ændring */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <div style={{ fontWeight: 600, fontSize: 15, color: COLORS.text, fontFamily: FONT_VALUE, letterSpacing: -0.2, fontVariantNumeric: 'tabular-nums' }}>
-              {card.value ? formatEur(card.value) : '—'}
+          {/* Value + Qty */}
+          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 4 }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 2, minWidth: 0, flex: 1 }}>
+              <span style={{ fontSize: 10, color: changeColor, fontWeight: 800, lineHeight: 1, flexShrink: 0 }}>
+                {dailyChange >= 0 ? '▲' : '▼'}
+              </span>
+              <span style={{ fontWeight: 700, fontSize: 13, color: COLORS.text, fontFamily: FONT_VALUE, letterSpacing: -0.3, fontVariantNumeric: 'tabular-nums', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {displayValue ? fmtAbs(displayValue) : '—'}
+              </span>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 2, fontSize: 10, color: changeColor, fontWeight: 700 }}>
-              {dailyChange >= 0 ? '▲' : '▼'} {dailyChange >= 0 ? '+' : ''}{dailyChange}%
-            </div>
+            <span style={{ fontSize: 10, color: COLORS.muted, fontWeight: 600, flexShrink: 0 }}>Qty: 1</span>
+          </div>
+
+          {/* Absolute change + % */}
+          <div style={{ fontSize: 10, fontWeight: 600, color: changeColor, fontFamily: FONT_VALUE, fontVariantNumeric: 'tabular-nums' }}>
+            {displayValue
+              ? `${dailyChange >= 0 ? '+' : '-'}${fmtAbs(absChange)} (${dailyChange >= 0 ? '+' : ''}${dailyChange.toFixed(2)}%)`
+              : <span style={{ color: COLORS.muted }}>No value set</span>
+            }
           </div>
 
         </div>

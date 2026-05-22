@@ -145,50 +145,67 @@ export default async function handler(req) {
   const aiData = await anthropicRes.json()
   const analysisText = aiData.content?.[0]?.text || ''
 
-  // Hent officielt kortbillede fra API
+  // Catalog lookup — fetch official image + price from card_catalog
   let officialImageUrl = null
-  let debugInfo = { cardName: null, apiStatus: null, apiResult: null }
+  let catalogId = null
+  let catalogPriceEur = null
+  let catalogCardmarketUrl = null
+  let debugInfo = { cardName: null, catalogHit: false }
+
   try {
     const raw = analysisText
     const start = raw.indexOf('{')
     const end = raw.lastIndexOf('}')
     if (start !== -1 && end !== -1) {
       const parsed = JSON.parse(raw.slice(start, end + 1))
-      debugInfo.cardName = parsed.cardName || null
-      const cardName = parsed.cardName
-      if (cardName && game === 'pokemon') {
-        const cardNumber = parsed.cardNumber || null
-        const setName = parsed.setName || null
+      const cardName = parsed.cardName || null
+      const cardNumber = parsed.cardNumber || null
+      const setName = parsed.setName || null
+      debugInfo.cardName = cardName
 
-        // Prøv eksakt match med kortnummer
-        if (cardNumber) {
+      const CATALOG_GAMES = ['pokemon', 'mtg', 'yugioh']
+
+      if (cardName && CATALOG_GAMES.includes(game)) {
+        const catalogHeaders = {
+          apikey: SUPABASE_SERVICE_KEY,
+          Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
+          'Content-Type': 'application/json',
+        }
+        const fields = 'id,image_url,cardmarket_url,price_eur'
+
+        // Strategy 1: exact number + set match
+        if (cardNumber && setName) {
           const num = cardNumber.split('/')[0]
-          const r = await fetch(`https://api.pokemontcg.io/v2/cards?q=name:"${encodeURIComponent(cardName)}" number:${num}&pageSize=1&select=images`)
-          const d = await r.json()
-          officialImageUrl = d.data?.[0]?.images?.large || d.data?.[0]?.images?.small
+          const url = `${SUPABASE_URL}/rest/v1/card_catalog?game=eq.${encodeURIComponent(game)}&number=eq.${encodeURIComponent(num)}&set_name=ilike.${encodeURIComponent(`*${setName}*`)}&select=${fields}&limit=1`
+          const r = await fetch(url, { headers: catalogHeaders })
+          const rows = r.ok ? await r.json() : []
+          if (rows[0]) { catalogId = rows[0].id; officialImageUrl = rows[0].image_url; catalogPriceEur = rows[0].price_eur; catalogCardmarketUrl = rows[0].cardmarket_url; debugInfo.catalogHit = true }
         }
 
-        // Fallback: søg med sætnavn
-        if (!officialImageUrl && setName) {
-          const r = await fetch(`https://api.pokemontcg.io/v2/cards?q=name:"${encodeURIComponent(cardName)}" set.name:"${encodeURIComponent(setName)}"&pageSize=1&select=images`)
-          const d = await r.json()
-          officialImageUrl = d.data?.[0]?.images?.large || d.data?.[0]?.images?.small
+        // Strategy 2: number only
+        if (!catalogId && cardNumber) {
+          const num = cardNumber.split('/')[0]
+          const url = `${SUPABASE_URL}/rest/v1/card_catalog?game=eq.${encodeURIComponent(game)}&number=eq.${encodeURIComponent(num)}&name=ilike.${encodeURIComponent(cardName)}&select=${fields}&limit=1`
+          const r = await fetch(url, { headers: catalogHeaders })
+          const rows = r.ok ? await r.json() : []
+          if (rows[0]) { catalogId = rows[0].id; officialImageUrl = rows[0].image_url; catalogPriceEur = rows[0].price_eur; catalogCardmarketUrl = rows[0].cardmarket_url; debugInfo.catalogHit = true }
         }
 
-        // Fallback: kun navn
-        if (!officialImageUrl) {
-          const r = await fetch(`https://api.pokemontcg.io/v2/cards?q=name:"${encodeURIComponent(cardName)}"&pageSize=1&select=images`)
-          const d = await r.json()
-          officialImageUrl = d.data?.[0]?.images?.large || d.data?.[0]?.images?.small
+        // Strategy 3: name + set
+        if (!catalogId && setName) {
+          const url = `${SUPABASE_URL}/rest/v1/card_catalog?game=eq.${encodeURIComponent(game)}&name=ilike.${encodeURIComponent(cardName)}&set_name=ilike.${encodeURIComponent(`*${setName}*`)}&select=${fields}&limit=1`
+          const r = await fetch(url, { headers: catalogHeaders })
+          const rows = r.ok ? await r.json() : []
+          if (rows[0]) { catalogId = rows[0].id; officialImageUrl = rows[0].image_url; catalogPriceEur = rows[0].price_eur; catalogCardmarketUrl = rows[0].cardmarket_url; debugInfo.catalogHit = true }
         }
-      } else if (game === 'mtg' && cardName) {
-        const r = await fetch(`https://api.scryfall.com/cards/named?fuzzy=${encodeURIComponent(cardName)}`)
-        const d = await r.json()
-        if (d.object !== 'error') officialImageUrl = d.image_uris?.large || d.image_uris?.normal
-      } else if (game === 'yugioh' && cardName) {
-        const r = await fetch(`https://db.ygoprodeck.com/api/v7/cardinfo.php?fname=${encodeURIComponent(cardName)}`)
-        const d = await r.json()
-        officialImageUrl = d.data?.[0]?.card_images?.[0]?.image_url || null
+
+        // Strategy 4: name only
+        if (!catalogId && cardName) {
+          const url = `${SUPABASE_URL}/rest/v1/card_catalog?game=eq.${encodeURIComponent(game)}&name=ilike.${encodeURIComponent(cardName)}&select=${fields}&limit=1`
+          const r = await fetch(url, { headers: catalogHeaders })
+          const rows = r.ok ? await r.json() : []
+          if (rows[0]) { catalogId = rows[0].id; officialImageUrl = rows[0].image_url; catalogPriceEur = rows[0].price_eur; catalogCardmarketUrl = rows[0].cardmarket_url; debugInfo.catalogHit = true }
+        }
       }
     }
   } catch (e) {
@@ -221,6 +238,9 @@ export default async function handler(req) {
   return new Response(JSON.stringify({
     analysis: analysisText,
     officialImageUrl,
+    catalogId: catalogId || null,
+    catalogPriceEur: catalogPriceEur || null,
+    catalogCardmarketUrl: catalogCardmarketUrl || null,
     ...(isDev ? { debugInfo } : {}),
   }), {
     headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
