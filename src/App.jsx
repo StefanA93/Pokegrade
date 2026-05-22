@@ -671,6 +671,7 @@ function GradeResult({ result, game, frontImg, user, onSave }) {
       name: result.cardName || result.name || result.kortNavn || null,
       game,
       grade: result.estimatedGrade,
+      finish: result.finish || null,
       value: valueNum,
       price_range: result.estimatedPSAValue || null,
       image_url: result.officialImageUrl || imageUrl,
@@ -1047,7 +1048,9 @@ function HomeScreen({ user, profile, onGoScan, onViewAll }) {
                         </div>
                         <div style={{ fontSize: 13, color: COLORS.muted }}>
                           {condition || '—'}
-                          {gameObj && <span> • {gameObj.label}</span>}
+                          {(card.finish || gameObj) && (
+                            <span> • {card.finish || gameObj?.label}</span>
+                          )}
                         </div>
                       </div>
                       <div style={{ textAlign: 'right', flexShrink: 0 }}>
