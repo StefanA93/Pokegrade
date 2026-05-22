@@ -1022,45 +1022,59 @@ function HomeScreen({ user, profile, onGoScan, onViewAll }) {
         {/* Most valuable */}
         {!loading && topCards.length > 0 && (
           <div style={{ marginBottom: 24 }}>
-            <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 12, letterSpacing: 0.3, color: '#ffffff' }}>Mest værdifulde</div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {topCards.map((card) => {
-                const game = GAMES.find(g => g.id === card.game)
+            <div style={{
+              background: 'linear-gradient(145deg, #0d0d14 0%, #0a0a10 100%)',
+              borderRadius: 20,
+              border: '1px solid rgba(212,175,55,0.15)',
+              boxShadow: '0 4px 24px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.03)',
+              overflow: 'hidden',
+            }}>
+              <div style={{ padding: '18px 20px 10px', fontWeight: 800, fontSize: 18, letterSpacing: 0.2, color: COLORS.text }}>
+                Mest værdifulde
+              </div>
+
+              {topCards.map((card, idx) => {
+                const gameObj = GAMES.find(g => g.id === card.game)
                 const condition = card.grade >= 9 ? 'Near Mint' : card.grade >= 7 ? 'Lightly Played' : card.grade >= 5 ? 'Moderately Played' : card.grade ? 'Heavily Played' : null
                 const conditionColor = card.grade >= 9 ? COLORS.success : card.grade >= 7 ? COLORS.gold : card.grade >= 5 ? '#e67e22' : COLORS.danger
                 return (
-                  <div key={card.id} style={{
-                    display: 'flex', alignItems: 'center',
-                    padding: '14px 16px',
-                    borderRadius: 16,
-                    background: 'linear-gradient(135deg, #0d0d14 0%, #0a0a10 100%)',
-                    border: '1px solid rgba(212,175,55,0.18)',
-                    boxShadow: '0 2px 16px rgba(0,0,0,0.35), inset 0 1px 0 rgba(212,175,55,0.04)',
-                  }}>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontWeight: 700, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginBottom: 3 }}>
-                        {card.name || 'Ukendt kort'}
-                      </div>
-                      <div style={{ fontSize: 12, color: COLORS.muted }}>
-                        {game?.label || card.game}
-                        {condition && <span style={{ color: conditionColor }}> • {condition}</span>}
-                      </div>
-                    </div>
-                    <div style={{ textAlign: 'right', flexShrink: 0, marginLeft: 12 }}>
-                      <div style={{ fontWeight: 800, fontSize: 15 }}>{formatEur(card.value)}</div>
-                      {card.grade && (
-                        <div style={{ fontSize: 11, color: COLORS.muted, marginTop: 2 }}>
-                          PSA est. {card.grade}
+                  <div key={card.id}>
+                    {idx > 0 && <div style={{ height: 1, background: 'rgba(255,255,255,0.05)', margin: '0 20px' }} />}
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '13px 20px' }}>
+                      <div style={{ flex: 1, minWidth: 0, marginRight: 16 }}>
+                        <div style={{ fontWeight: 700, fontSize: 15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginBottom: 4, color: COLORS.text }}>
+                          {card.name || 'Ukendt kort'}
                         </div>
-                      )}
+                        <div style={{ fontSize: 13, color: COLORS.muted }}>
+                          {condition || '—'}
+                          {gameObj && <span> • {gameObj.label}</span>}
+                        </div>
+                      </div>
+                      <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                        <div style={{ fontWeight: 700, fontSize: 15, color: COLORS.text, marginBottom: 4 }}>
+                          {formatEur(card.value)}
+                        </div>
+                        {card.grade && (
+                          <div style={{ fontSize: 13, color: conditionColor, fontWeight: 600 }}>
+                            PSA est. {card.grade}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
                 )
               })}
+
+              <div style={{ height: 1, background: 'rgba(255,255,255,0.05)' }} />
+              <button onClick={onViewAll} style={{
+                display: 'block', width: '100%', textAlign: 'center',
+                padding: '15px 20px', color: COLORS.gold, fontWeight: 700, fontSize: 15,
+                background: 'none', border: 'none', cursor: 'pointer', letterSpacing: 0.3,
+                textShadow: '0 0 16px rgba(212,175,55,0.35)',
+              }}>
+                Se alle
+              </button>
             </div>
-            <button onClick={onViewAll} style={{ display: 'block', width: '100%', textAlign: 'center', marginTop: 14, color: '#D4AF37', fontWeight: 700, fontSize: 14, background: 'none', border: 'none', cursor: 'pointer', letterSpacing: 0.3, textShadow: '0 0 16px rgba(212,175,55,0.4)' }}>
-              Se alle →
-            </button>
           </div>
         )}
 
