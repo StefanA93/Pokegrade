@@ -1519,9 +1519,19 @@ function SettingsScreen({ user, profile, onSignOut }) {
   )
 }
 
+const GAME_LOGOS = {
+  pokemon:    'https://upload.wikimedia.org/wikipedia/commons/1/1a/Pok%C3%A9mon_Trading_Card_Game_logo.svg',
+  mtg:        'https://upload.wikimedia.org/wikipedia/commons/3/3f/Magicthegathering-logo.svg',
+  yugioh:     'https://upload.wikimedia.org/wikipedia/commons/2/21/Yu-Gi-Oh%21.png',
+  onepiece:   'https://upload.wikimedia.org/wikipedia/commons/6/6c/One_piece_logo.svg',
+  dragonball: 'https://upload.wikimedia.org/wikipedia/commons/d/d5/DBSlogo-01.png',
+  lorcana:    'https://upload.wikimedia.org/wikipedia/en/0/08/Disney_Lorcana_Logo.png',
+}
+
 // SEARCH SCREEN
 function SearchScreen({ onSelectGame }) {
   const [query, setQuery] = useState('')
+  const [imgErrors, setImgErrors] = useState({})
 
   return (
     <div style={{ paddingBottom: 110, maxWidth: 480, margin: '0 auto' }}>
@@ -1537,10 +1547,7 @@ function SearchScreen({ onSelectGame }) {
             value={query}
             onChange={e => setQuery(e.target.value)}
             placeholder="Søg efter kort..."
-            style={{
-              flex: 1, background: 'none', border: 'none', outline: 'none',
-              color: COLORS.text, fontSize: 15,
-            }}
+            style={{ flex: 1, background: 'none', border: 'none', outline: 'none', color: COLORS.text, fontSize: 15 }}
           />
           {query ? (
             <button onClick={() => setQuery('')} style={{ background: 'none', border: 'none', color: COLORS.muted, fontSize: 18, cursor: 'pointer', padding: 0, lineHeight: 1 }}>✕</button>
@@ -1558,42 +1565,45 @@ function SearchScreen({ onSelectGame }) {
       <div style={{ padding: '28px 16px 0' }}>
         <div style={{ fontWeight: 800, fontSize: 18, marginBottom: 16 }}>Quick Filters</div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-          {GAMES.map(game => (
-            <button
-              key={game.id}
-              onClick={() => onSelectGame(game.id)}
-              style={{
-                background: COLORS.card,
-                border: `1px solid ${game.color}33`,
-                borderRadius: 16,
-                padding: '28px 16px',
-                display: 'flex', flexDirection: 'column',
-                alignItems: 'center', justifyContent: 'center',
-                gap: 10, cursor: 'pointer',
-                position: 'relative', overflow: 'hidden',
-              }}
-            >
-              {/* Color glow */}
-              <div style={{
-                position: 'absolute', inset: 0,
-                background: `radial-gradient(ellipse at 50% 0%, ${game.color}18 0%, transparent 70%)`,
-                pointerEvents: 'none',
-              }} />
-              <span style={{ fontSize: 40, lineHeight: 1, position: 'relative', zIndex: 1 }}>{game.emoji}</span>
-              <div style={{
-                fontWeight: 800, fontSize: 13, color: COLORS.text,
-                textAlign: 'center', lineHeight: 1.3,
-                position: 'relative', zIndex: 1,
-              }}>
-                {game.label}
-              </div>
-              <div style={{
-                position: 'absolute', bottom: 0, left: 0, right: 0,
-                height: 3, borderRadius: '0 0 16px 16px',
-                background: `linear-gradient(to right, ${game.color}88, ${game.color}22)`,
-              }} />
-            </button>
-          ))}
+          {GAMES.map(game => {
+            const logoUrl = GAME_LOGOS[game.id]
+            const hasLogo = logoUrl && !imgErrors[game.id]
+            return (
+              <button
+                key={game.id}
+                onClick={() => onSelectGame(game.id)}
+                style={{
+                  background: '#141414',
+                  border: `1px solid #2a2a2a`,
+                  borderRadius: 16,
+                  height: 110,
+                  display: 'flex', flexDirection: 'column',
+                  alignItems: 'center', justifyContent: 'center',
+                  gap: 8, cursor: 'pointer',
+                  position: 'relative', overflow: 'hidden',
+                  padding: '16px 20px',
+                }}
+              >
+                {hasLogo ? (
+                  <img
+                    src={logoUrl}
+                    alt={game.label}
+                    onError={() => setImgErrors(e => ({ ...e, [game.id]: true }))}
+                    style={{
+                      maxWidth: '85%', maxHeight: 60,
+                      objectFit: 'contain',
+                      filter: game.id === 'yugioh' || game.id === 'onepiece' ? 'brightness(1.1)' : 'none',
+                    }}
+                  />
+                ) : (
+                  <>
+                    <span style={{ fontSize: 36, lineHeight: 1 }}>{game.emoji}</span>
+                    <div style={{ fontWeight: 800, fontSize: 12, color: COLORS.text, textAlign: 'center' }}>{game.label}</div>
+                  </>
+                )}
+              </button>
+            )
+          })}
         </div>
       </div>
     </div>
