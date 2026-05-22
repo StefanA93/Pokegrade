@@ -1057,11 +1057,11 @@ function HomeScreen({ user, profile, onGoScan, onViewAll }) {
 }
 
 // COLLECTION SCREEN
-function CollectionScreen({ user }) {
+function CollectionScreen({ user, initialGame, onClearFilter }) {
   const [cards, setCards] = useState([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
-  const [filterGame, setFilterGame] = useState('all')
+  const [filterGame, setFilterGame] = useState(initialGame || 'all')
   const [sortBy, setSortBy] = useState('newest')
   const [dbError, setDbError] = useState('')
 
@@ -1519,31 +1519,120 @@ function SettingsScreen({ user, profile, onSignOut }) {
   )
 }
 
+// SEARCH SCREEN
+function SearchScreen({ onSelectGame }) {
+  const [query, setQuery] = useState('')
+
+  return (
+    <div style={{ paddingBottom: 110, maxWidth: 480, margin: '0 auto' }}>
+      {/* Search bar */}
+      <div style={{ padding: '16px 16px 0' }}>
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 10,
+          background: COLORS.card, borderRadius: 50,
+          border: `1px solid ${COLORS.border}`, padding: '0 16px', height: 48,
+        }}>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={COLORS.muted} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            placeholder="Søg efter kort..."
+            style={{
+              flex: 1, background: 'none', border: 'none', outline: 'none',
+              color: COLORS.text, fontSize: 15,
+            }}
+          />
+          {query ? (
+            <button onClick={() => setQuery('')} style={{ background: 'none', border: 'none', color: COLORS.muted, fontSize: 18, cursor: 'pointer', padding: 0, lineHeight: 1 }}>✕</button>
+          ) : (
+            <>
+              <div style={{ width: 1, height: 20, background: COLORS.border }} />
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={COLORS.muted} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={COLORS.muted} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="4" y1="6" x2="20" y2="6"/><line x1="8" y1="12" x2="16" y2="12"/><line x1="11" y1="18" x2="13" y2="18"/></svg>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Quick Filters */}
+      <div style={{ padding: '28px 16px 0' }}>
+        <div style={{ fontWeight: 800, fontSize: 18, marginBottom: 16 }}>Quick Filters</div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          {GAMES.map(game => (
+            <button
+              key={game.id}
+              onClick={() => onSelectGame(game.id)}
+              style={{
+                background: COLORS.card,
+                border: `1px solid ${game.color}33`,
+                borderRadius: 16,
+                padding: '28px 16px',
+                display: 'flex', flexDirection: 'column',
+                alignItems: 'center', justifyContent: 'center',
+                gap: 10, cursor: 'pointer',
+                position: 'relative', overflow: 'hidden',
+              }}
+            >
+              {/* Color glow */}
+              <div style={{
+                position: 'absolute', inset: 0,
+                background: `radial-gradient(ellipse at 50% 0%, ${game.color}18 0%, transparent 70%)`,
+                pointerEvents: 'none',
+              }} />
+              <span style={{ fontSize: 40, lineHeight: 1, position: 'relative', zIndex: 1 }}>{game.emoji}</span>
+              <div style={{
+                fontWeight: 800, fontSize: 13, color: COLORS.text,
+                textAlign: 'center', lineHeight: 1.3,
+                position: 'relative', zIndex: 1,
+              }}>
+                {game.label}
+              </div>
+              <div style={{
+                position: 'absolute', bottom: 0, left: 0, right: 0,
+                height: 3, borderRadius: '0 0 16px 16px',
+                background: `linear-gradient(to right, ${game.color}88, ${game.color}22)`,
+              }} />
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // BOTTOM NAV
 function BottomNav({ tab, setTab }) {
   const tabs = [
     {
       id: 'home', label: 'Hjem',
       icon: (active) => (
-        <svg width="22" height="22" viewBox="0 0 24 24" fill={active ? COLORS.gold : COLORS.muted}><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill={active ? COLORS.gold : COLORS.muted}><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>
       )
     },
     {
-      id: 'scan', label: 'Scan',
+      id: 'search', label: 'Søg',
       icon: (active) => (
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={active ? COLORS.gold : COLORS.muted} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="12" cy="12" r="4"/><line x1="12" y1="3" x2="12" y2="7"/><line x1="12" y1="17" x2="12" y2="21"/><line x1="3" y1="12" x2="7" y2="12"/><line x1="17" y1="12" x2="21" y2="12"/></svg>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={active ? COLORS.gold : COLORS.muted} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      )
+    },
+    {
+      id: 'scan', label: 'Ai Grade',
+      icon: (active) => (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={active ? COLORS.gold : COLORS.muted} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 17l-6.2 4.3 2.4-7.4L2 9.4h7.6z"/>
+        </svg>
       )
     },
     {
       id: 'collection', label: 'Samling',
       icon: (active) => (
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={active ? COLORS.gold : COLORS.muted} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="8" height="8" rx="1"/><rect x="13" y="3" width="8" height="8" rx="1"/><rect x="13" y="13" width="8" height="8" rx="1"/><rect x="3" y="13" width="8" height="8" rx="1"/></svg>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={active ? COLORS.gold : COLORS.muted} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="8" height="8" rx="1"/><rect x="13" y="3" width="8" height="8" rx="1"/><rect x="13" y="13" width="8" height="8" rx="1"/><rect x="3" y="13" width="8" height="8" rx="1"/></svg>
       )
     },
     {
       id: 'settings', label: 'Profil',
       icon: (active) => (
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={active ? COLORS.gold : COLORS.muted} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={active ? COLORS.gold : COLORS.muted} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
       )
     },
   ]
@@ -1624,6 +1713,7 @@ export default function App() {
   const [session, setSession] = useState(null)
   const [profile, setProfile] = useState(null)
   const [tab, setTab] = useState('home')
+  const [searchGameFilter, setSearchGameFilter] = useState(null)
   const [onboarded, setOnboarded] = useState(() => localStorage.getItem('gd_onboarded') === '1')
   const [loading, setLoading] = useState(true)
   const [splashDone, setSplashDone] = useState(false)
@@ -1728,8 +1818,9 @@ export default function App() {
     <ErrorBoundary>
       <div style={{ background: COLORS.bg, minHeight: '100dvh' }}>
         {tab === 'home' && <HomeScreen user={session.user} profile={profile} onGoScan={() => setTab('scan')} onViewAll={() => setTab('collection')} />}
+        {tab === 'search' && <SearchScreen onSelectGame={gameId => { setSearchGameFilter(gameId); setTab('collection') }} />}
         {tab === 'scan' && <ScanScreen user={session.user} profile={profile} onScanDone={() => loadProfile(session.user.id)} />}
-        {tab === 'collection' && <CollectionScreen user={session.user} />}
+        {tab === 'collection' && <CollectionScreen user={session.user} initialGame={searchGameFilter} onClearFilter={() => setSearchGameFilter(null)} />}
         {tab === 'settings' && <SettingsScreen user={session.user} profile={profile} onSignOut={() => setSession(null)} />}
         <BottomNav tab={tab} setTab={setTab} />
       </div>
