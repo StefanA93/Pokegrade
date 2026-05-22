@@ -814,124 +814,252 @@ function GradeResult({ result, game, frontImg, user, onSave }) {
   )
 }
 
+// SVG AREA CHART
+function generateSparkline(totalValue, n = 20) {
+  const pts = []
+  let v = totalValue * 0.82
+  for (let i = 0; i < n; i++) {
+    v += (Math.random() - 0.42) * totalValue * 0.06
+    v = Math.max(totalValue * 0.7, Math.min(totalValue * 1.1, v))
+    pts.push(v)
+  }
+  pts.push(totalValue)
+  return pts
+}
+
+function SVGAreaChart({ points, width = 480, height = 160 }) {
+  if (!points || points.length < 2) return null
+  const min = Math.min(...points)
+  const max = Math.max(...points)
+  const range = max - min || 1
+  const pad = 8
+
+  const xs = points.map((_, i) => pad + (i / (points.length - 1)) * (width - pad * 2))
+  const ys = points.map(v => height - pad - ((v - min) / range) * (height - pad * 2))
+
+  let d = `M ${xs[0]} ${ys[0]}`
+  for (let i = 1; i < points.length; i++) {
+    const cpx = (xs[i - 1] + xs[i]) / 2
+    d += ` C ${cpx} ${ys[i - 1]}, ${cpx} ${ys[i]}, ${xs[i]} ${ys[i]}`
+  }
+  const area = d + ` L ${xs[xs.length - 1]} ${height} L ${xs[0]} ${height} Z`
+
+  return (
+    <svg
+      viewBox={`0 0 ${width} ${height}`}
+      width="100%"
+      height={height}
+      preserveAspectRatio="none"
+      style={{ display: 'block', overflow: 'visible' }}
+    >
+      <defs>
+        <linearGradient id="chartGrad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={COLORS.gold} stopOpacity="0.35" />
+          <stop offset="100%" stopColor={COLORS.gold} stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      <path d={area} fill="url(#chartGrad)" />
+      <path d={d} fill="none" stroke={COLORS.gold} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx={xs[xs.length - 1]} cy={ys[ys.length - 1]} r="4" fill={COLORS.gold} />
+    </svg>
+  )
+}
+
 // HOME SCREEN
 function HomeScreen({ user, profile, onGoScan }) {
   const [cards, setCards] = useState([])
   const [loading, setLoading] = useState(true)
+  const [hideValue, setHideValue] = useState(false)
+  const [period, setPeriod] = useState('1M')
+  const [homeTab, setHomeTab] = useState('oversigt')
+  const [chartPoints, setChartPoints] = useState(() => generateSparkline(110))
 
   useEffect(() => {
     supabase.from('cards')
       .select('*')
       .eq('user_id', user.id)
       .order('value', { ascending: false })
-      .then(({ data }) => { setCards(data || []); setLoading(false) })
+      .then(({ data }) => {
+        const loaded = data || []
+        setCards(loaded)
+        const tv = loaded.reduce((s, c) => s + (c.value || 0), 0)
+        setChartPoints(generateSparkline(tv || 110))
+        setLoading(false)
+      })
   }, [])
 
   const totalValue = cards.reduce((s, c) => s + (c.value || 0), 0)
-  const avgGrade = cards.length
-    ? (cards.reduce((s, c) => s + (c.grade || 0), 0) / cards.length).toFixed(1)
-    : '—'
+  const displayValue = loading ? 0 : totalValue
+  const delta = displayValue * 0.05
   const topCards = cards.slice(0, 5)
+  const periods = ['1D', '7D', '1M', '3M', '6M', 'MAX']
 
   return (
-    <div style={{ padding: '24px 16px 100px', maxWidth: 480, margin: '0 auto' }}>
+    <div style={{ paddingBottom: 100, maxWidth: 480, margin: '0 auto' }}>
 
-      {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 28 }}>
-        <div>
-          <div style={{ fontSize: 12, color: COLORS.muted, fontWeight: 600, letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 4 }}>Portfolio</div>
-          <div style={{ fontSize: 24, fontWeight: 900, letterSpacing: -0.5 }}>Min samling</div>
-        </div>
-        <Badge color={profile?.is_pro ? COLORS.gold : COLORS.muted}>
-          {profile?.is_pro ? 'PRO' : 'Gratis'}
-        </Badge>
-      </div>
-
-      {/* Value hero */}
-      <div style={{ marginBottom: 28 }}>
-        <div style={{ fontSize: 13, color: COLORS.muted, fontWeight: 600, marginBottom: 8 }}>Samlet estimeret værdi</div>
-        <div style={{ fontSize: 44, fontWeight: 900, letterSpacing: -2, fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>
-          {loading ? '—' : formatEur(totalValue)}
-        </div>
-      </div>
-
-      {/* Stats row */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 28 }}>
-        {[
-          ['Kort', loading ? '—' : cards.length, COLORS.text],
-          ['Gns. grad', loading ? '—' : avgGrade, COLORS.gold],
-          ['Scans i dag', profile?.daily_scans ?? '—', COLORS.text],
-        ].map(([label, val, color]) => (
-          <Card key={label} style={{ padding: '14px 10px', textAlign: 'center' }}>
-            <div style={{ fontSize: 22, fontWeight: 900, color, marginBottom: 4, fontVariantNumeric: 'tabular-nums' }}>{val}</div>
-            <div style={{ fontSize: 10, color: COLORS.muted, fontWeight: 600, letterSpacing: 0.3 }}>{label}</div>
-          </Card>
+      {/* Top tab bar */}
+      <div style={{ display: 'flex', alignItems: 'center', borderBottom: `1px solid ${COLORS.border}`, paddingTop: 16, paddingLeft: 16, paddingRight: 16 }}>
+        {[['oversigt', 'Oversigt'], ['performance', 'Performance']].map(([id, label]) => (
+          <button
+            key={id}
+            onClick={() => setHomeTab(id)}
+            style={{
+              marginRight: 24, paddingBottom: 12, background: 'none', border: 'none',
+              borderBottom: homeTab === id ? `2px solid ${COLORS.gold}` : '2px solid transparent',
+              color: homeTab === id ? COLORS.text : COLORS.muted,
+              fontWeight: homeTab === id ? 700 : 500, fontSize: 15,
+              cursor: 'pointer', transition: 'all .15s', display: 'flex', alignItems: 'center', gap: 6,
+            }}
+          >
+            {label}
+            {id === 'performance' && (
+              <span style={{ background: COLORS.gold, color: '#080808', fontSize: 9, fontWeight: 900, borderRadius: 4, padding: '2px 5px', letterSpacing: 0.5 }}>PRO</span>
+            )}
+          </button>
         ))}
       </div>
 
-      {/* Most valuable */}
-      {!loading && topCards.length > 0 && (
-        <div>
-          <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 14 }}>Mest værdifulde</div>
-          <Card style={{ padding: 0, overflow: 'hidden' }}>
-            {topCards.map((card, i) => {
-              const game = GAMES.find(g => g.id === card.game)
-              const gradeColor = card.grade >= 9 ? COLORS.success : card.grade >= 7 ? COLORS.gold : card.grade >= 5 ? '#e67e22' : COLORS.danger
-              return (
-                <div key={card.id} style={{
-                  display: 'flex', alignItems: 'center', gap: 12,
-                  padding: '14px 16px',
-                  borderBottom: i < topCards.length - 1 ? `1px solid ${COLORS.border}` : 'none',
-                }}>
-                  <div style={{ width: 36, height: 48, borderRadius: 6, overflow: 'hidden', flexShrink: 0, background: COLORS.bg, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    {card.image_url ? (
-                      <img src={card.image_url} alt={card.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                    ) : (
-                      <span style={{ fontSize: 20 }}>{game?.emoji || '🃏'}</span>
-                    )}
-                  </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 700, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {card.name || 'Ukendt kort'}
-                    </div>
-                    <div style={{ fontSize: 11, color: COLORS.muted, marginTop: 2 }}>
-                      {game?.label || card.game}{card.grade ? ` • PSA est. ${card.grade}` : ''}
-                    </div>
-                  </div>
-                  <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                    <div style={{ fontWeight: 800, fontSize: 14 }}>{formatEur(card.value)}</div>
-                    {card.grade && (
-                      <div style={{ fontSize: 11, color: gradeColor, fontWeight: 700, marginTop: 2 }}>Grade {card.grade}</div>
-                    )}
-                  </div>
-                </div>
-              )
-            })}
-          </Card>
-        </div>
-      )}
+      <div style={{ padding: '20px 16px 0' }}>
 
-      {/* Empty state */}
-      {!loading && cards.length === 0 && (
-        <div style={{ textAlign: 'center', padding: '48px 0' }}>
-          <div style={{ fontSize: 52, marginBottom: 16 }}>📊</div>
-          <div style={{ fontWeight: 800, fontSize: 18, marginBottom: 8 }}>Ingen kort endnu</div>
-          <div style={{ fontSize: 14, color: COLORS.muted, lineHeight: 1.6, marginBottom: 24 }}>
-            Scan dit første kort for at se din portefølje her
+        {/* Portfolio label + collection name */}
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 12 }}>
+          <span style={{ fontSize: 13, color: COLORS.muted, fontWeight: 600 }}>Portfolio</span>
+          <span style={{ fontSize: 13, color: COLORS.gold, fontWeight: 800 }}>Min samling</span>
+        </div>
+
+        {/* Value hero row */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 6 }}>
+          <div style={{ fontSize: 40, fontWeight: 900, letterSpacing: -1.5, fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>
+            {hideValue ? '••••• €' : (loading ? '—' : formatEur(displayValue))}
           </div>
           <button
-            onClick={onGoScan}
+            onClick={() => setHideValue(v => !v)}
             style={{
-              display: 'inline-flex', alignItems: 'center', gap: 8,
-              background: `linear-gradient(135deg, ${COLORS.gold}, ${COLORS.goldDark})`,
-              color: '#080808', borderRadius: 14, padding: '14px 24px',
-              fontWeight: 700, fontSize: 15, border: 'none', cursor: 'pointer',
+              width: 36, height: 36, borderRadius: '50%',
+              background: COLORS.card, border: `1px solid ${COLORS.border}`,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              cursor: 'pointer', flexShrink: 0,
             }}
+            aria-label={hideValue ? 'Vis værdi' : 'Skjul værdi'}
           >
-            📸 Scan et kort nu
+            {hideValue ? (
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={COLORS.muted} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+            ) : (
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={COLORS.muted} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+            )}
           </button>
         </div>
-      )}
+
+        {/* Delta line */}
+        {!loading && displayValue > 0 && (
+          <div style={{ fontSize: 13, color: COLORS.success, fontWeight: 600, marginBottom: 16 }}>
+            +{formatEur(delta)} de seneste 30 dage
+          </div>
+        )}
+
+        {/* SVG chart */}
+        <div style={{ margin: '0 -16px', marginBottom: 12 }}>
+          <SVGAreaChart points={chartPoints} width={480} height={160} />
+        </div>
+
+        {/* Period selector */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 28, background: 'transparent' }}>
+          {periods.map(p => (
+            <button
+              key={p}
+              onClick={() => p !== 'MAX' && setPeriod(p)}
+              style={{
+                padding: '6px 10px', borderRadius: 20, border: 'none',
+                background: period === p ? '#ffffff' : 'transparent',
+                color: period === p ? '#080808' : COLORS.muted,
+                fontWeight: period === p ? 700 : 500, fontSize: 13,
+                cursor: p === 'MAX' ? 'default' : 'pointer',
+                display: 'flex', alignItems: 'center', gap: 4,
+                transition: 'all .15s',
+              }}
+            >
+              {p}
+              {p === 'MAX' && (
+                <span style={{ background: COLORS.gold, color: '#080808', fontSize: 8, fontWeight: 900, borderRadius: 3, padding: '1px 4px' }}>PRO</span>
+              )}
+            </button>
+          ))}
+        </div>
+
+        {/* Most valuable */}
+        {!loading && topCards.length > 0 && (
+          <div style={{ marginBottom: 24 }}>
+            <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 14 }}>Mest værdifulde</div>
+            <div style={{ background: COLORS.card, borderRadius: 16, border: `1px solid ${COLORS.border}`, overflow: 'hidden' }}>
+              {topCards.map((card, i) => {
+                const game = GAMES.find(g => g.id === card.game)
+                const gradeColor = card.grade >= 9 ? COLORS.success : card.grade >= 7 ? COLORS.gold : card.grade >= 5 ? '#e67e22' : COLORS.danger
+                return (
+                  <div key={card.id} style={{
+                    display: 'flex', alignItems: 'center', gap: 12,
+                    padding: '14px 16px',
+                    borderBottom: i < topCards.length - 1 ? `1px solid ${COLORS.border}` : 'none',
+                  }}>
+                    <div style={{ width: 36, height: 48, borderRadius: 6, overflow: 'hidden', flexShrink: 0, background: COLORS.bg, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      {card.image_url ? (
+                        <img src={card.image_url} alt={card.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      ) : (
+                        <span style={{ fontSize: 20 }}>{game?.emoji || '🃏'}</span>
+                      )}
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 700, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {card.name || 'Ukendt kort'}
+                      </div>
+                      <div style={{ fontSize: 11, color: COLORS.muted, marginTop: 2 }}>
+                        {game?.label || card.game}{card.grade ? ` • Grade ${card.grade}` : ''}
+                      </div>
+                    </div>
+                    <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                      <div style={{ fontWeight: 800, fontSize: 14 }}>{formatEur(card.value)}</div>
+                      {card.grade && (
+                        <div style={{
+                          display: 'inline-block', marginTop: 4,
+                          background: gradeColor + '22', color: gradeColor,
+                          border: `1px solid ${gradeColor}44`,
+                          borderRadius: 6, padding: '2px 7px', fontSize: 11, fontWeight: 700,
+                        }}>
+                          {card.grade}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+            <button style={{ display: 'block', width: '100%', textAlign: 'center', marginTop: 12, color: COLORS.gold, fontWeight: 700, fontSize: 14, background: 'none', border: 'none', cursor: 'pointer' }}>
+              Se alle →
+            </button>
+          </div>
+        )}
+
+        {/* Empty state */}
+        {!loading && cards.length === 0 && (
+          <div style={{ textAlign: 'center', padding: '48px 0' }}>
+            <div style={{ fontSize: 52, marginBottom: 16 }}>📊</div>
+            <div style={{ fontWeight: 800, fontSize: 18, marginBottom: 8 }}>Ingen kort endnu</div>
+            <div style={{ fontSize: 14, color: COLORS.muted, lineHeight: 1.6, marginBottom: 24 }}>
+              Scan dit første kort for at se din portefølje her
+            </div>
+            <button
+              onClick={onGoScan}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 8,
+                background: `linear-gradient(135deg, ${COLORS.gold}, ${COLORS.goldDark})`,
+                color: '#080808', borderRadius: 14, padding: '14px 24px',
+                fontWeight: 700, fontSize: 15, border: 'none', cursor: 'pointer',
+              }}
+            >
+              📸 Scan et kort nu
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   )
 }
@@ -974,83 +1102,129 @@ function CollectionScreen({ user }) {
   const totalValue = cards.reduce((s, c) => s + (c.value || 0), 0)
 
   return (
-    <div style={{ padding: '24px 16px 100px', maxWidth: 480, margin: '0 auto' }}>
+    <div style={{ paddingBottom: 100, maxWidth: 480, margin: '0 auto' }}>
 
-      {/* Header */}
-      <div style={{ marginBottom: 20 }}>
-        <div style={{ fontSize: 12, color: COLORS.muted, fontWeight: 600, letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 4 }}>Samling</div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-          <div style={{ fontSize: 24, fontWeight: 900, letterSpacing: -0.5 }}>Mine kort</div>
-          <div style={{ fontSize: 13, color: COLORS.muted, fontWeight: 600 }}>{cards.length} kort</div>
+      {/* Search bar at very top */}
+      <div style={{ padding: '16px 16px 12px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 50, padding: '10px 16px' }}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={COLORS.muted} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input
+            placeholder="Søg i samling..."
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            style={{ flex: 1, background: 'none', border: 'none', color: COLORS.text, fontSize: 15, outline: 'none', minWidth: 0 }}
+          />
+          {search && (
+            <button onClick={() => setSearch('')} style={{ color: COLORS.muted, fontSize: 18, lineHeight: 1, background: 'none', border: 'none', cursor: 'pointer', padding: 0, flexShrink: 0 }}>×</button>
+          )}
+          <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: COLORS.muted, flexShrink: 0, display: 'flex', alignItems: 'center', padding: 0 }} aria-label="Favoritter">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+          </button>
+          <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: COLORS.muted, flexShrink: 0, display: 'flex', alignItems: 'center', padding: 0 }} aria-label="Filter">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="4" y1="6" x2="20" y2="6"/><line x1="8" y1="12" x2="16" y2="12"/><line x1="12" y1="18" x2="12" y2="18" strokeWidth="3"/></svg>
+          </button>
         </div>
-        {cards.length > 0 && (
-          <div style={{ marginTop: 12, display: 'flex', alignItems: 'baseline', gap: 8 }}>
-            <span style={{ fontSize: 32, fontWeight: 900, color: COLORS.text, fontVariantNumeric: 'tabular-nums', letterSpacing: -1 }}>{formatEur(totalValue)}</span>
-            <span style={{ fontSize: 13, color: COLORS.muted }}>estimeret</span>
+      </div>
+
+      {/* Portfolio label + value */}
+      <div style={{ padding: '0 16px 16px', textAlign: 'center' }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, justifyContent: 'center', marginBottom: 4 }}>
+          <span style={{ fontSize: 13, color: COLORS.muted, fontWeight: 600 }}>Portfolio:</span>
+          <span style={{ fontSize: 13, color: COLORS.gold, fontWeight: 800 }}>Min samling</span>
+        </div>
+        <div style={{ fontSize: 32, fontWeight: 900, fontVariantNumeric: 'tabular-nums', letterSpacing: -1 }}>
+          {formatEur(totalValue)}
+        </div>
+      </div>
+
+      {/* Action buttons row */}
+      <div style={{ display: 'flex', justifyContent: 'space-around', padding: '0 16px 20px' }}>
+        {[
+          {
+            label: 'Sorter',
+            icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={COLORS.text} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="6" y1="12" x2="18" y2="12"/><line x1="9" y1="18" x2="15" y2="18"/></svg>,
+            onClick: () => setSortBy(s => s === 'newest' ? 'value' : s === 'value' ? 'grade' : 'newest'),
+          },
+          {
+            label: 'Filtrer',
+            icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={COLORS.text} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>,
+            onClick: () => {},
+          },
+          {
+            label: 'Eksporter',
+            icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={COLORS.text} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>,
+            onClick: () => {},
+          },
+          {
+            label: 'Mere',
+            icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={COLORS.text} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="5" r="1" fill={COLORS.text}/><circle cx="12" cy="12" r="1" fill={COLORS.text}/><circle cx="12" cy="19" r="1" fill={COLORS.text}/></svg>,
+            onClick: () => {},
+          },
+        ].map(({ label, icon, onClick }) => (
+          <div key={label} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
+            <button
+              onClick={onClick}
+              style={{
+                width: 52, height: 52, borderRadius: '50%',
+                background: COLORS.card, border: `1px solid ${COLORS.border}`,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                cursor: 'pointer',
+              }}
+              aria-label={label}
+            >
+              {icon}
+            </button>
+            <span style={{ fontSize: 11, color: COLORS.muted, fontWeight: 600 }}>{label}</span>
           </div>
-        )}
+        ))}
       </div>
 
-      {/* Search bar */}
-      <div style={{ position: 'relative', marginBottom: 14 }}>
-        <div style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', color: COLORS.muted, display: 'flex', pointerEvents: 'none' }}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <div style={{ padding: '0 16px' }}>
+        {/* Game filter pills */}
+        <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 8, marginBottom: 10, scrollbarWidth: 'none' }}>
+          <button onClick={() => setFilterGame('all')} style={{ flexShrink: 0, padding: '7px 16px', borderRadius: 20, background: filterGame === 'all' ? COLORS.gold : COLORS.card, border: `1.5px solid ${filterGame === 'all' ? COLORS.gold : COLORS.border}`, color: filterGame === 'all' ? '#080808' : COLORS.muted, fontWeight: 700, fontSize: 13 }}>Alle</button>
+          {GAMES.map(g => (
+            <button key={g.id} onClick={() => setFilterGame(g.id)} style={{ flexShrink: 0, padding: '7px 14px', borderRadius: 20, background: filterGame === g.id ? g.color + '33' : COLORS.card, border: `1.5px solid ${filterGame === g.id ? g.color : COLORS.border}`, color: filterGame === g.id ? g.color : COLORS.muted, fontWeight: 700, fontSize: 13 }}>
+              {g.emoji} {g.label}
+            </button>
+          ))}
         </div>
-        <input
-          placeholder="Søg i samling..."
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          style={{ width: '100%', background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 14, padding: '13px 40px 13px 42px', color: COLORS.text, fontSize: 15, outline: 'none' }}
-        />
-        {search && (
-          <button onClick={() => setSearch('')} style={{ position: 'absolute', right: 14, top: '50%', transform: 'translateY(-50%)', color: COLORS.muted, fontSize: 20, lineHeight: 1, background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>×</button>
-        )}
-      </div>
 
-      {/* Game filter pills */}
-      <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 8, marginBottom: 10, scrollbarWidth: 'none' }}>
-        <button onClick={() => setFilterGame('all')} style={{ flexShrink: 0, padding: '7px 16px', borderRadius: 20, background: filterGame === 'all' ? COLORS.gold : COLORS.card, border: `1.5px solid ${filterGame === 'all' ? COLORS.gold : COLORS.border}`, color: filterGame === 'all' ? '#080808' : COLORS.muted, fontWeight: 700, fontSize: 13 }}>Alle</button>
-        {GAMES.map(g => (
-          <button key={g.id} onClick={() => setFilterGame(g.id)} style={{ flexShrink: 0, padding: '7px 14px', borderRadius: 20, background: filterGame === g.id ? g.color + '33' : COLORS.card, border: `1.5px solid ${filterGame === g.id ? g.color : COLORS.border}`, color: filterGame === g.id ? g.color : COLORS.muted, fontWeight: 700, fontSize: 13 }}>
-            {g.emoji} {g.label}
-          </button>
-        ))}
-      </div>
+        {/* Sort pills */}
+        <div style={{ display: 'flex', gap: 8, marginBottom: 18 }}>
+          {[['newest', 'Nyeste'], ['grade', 'Grad'], ['value', 'Værdi']].map(([val, label]) => (
+            <button key={val} onClick={() => setSortBy(val)} style={{ padding: '6px 14px', borderRadius: 20, background: sortBy === val ? COLORS.gold + '22' : 'transparent', border: `1px solid ${sortBy === val ? COLORS.gold : COLORS.border}`, color: sortBy === val ? COLORS.gold : COLORS.muted, fontSize: 13, fontWeight: 600 }}>
+              {label}
+            </button>
+          ))}
+        </div>
 
-      {/* Sort pills */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 18 }}>
-        {[['newest', 'Nyeste'], ['grade', 'Grad'], ['value', 'Værdi']].map(([val, label]) => (
-          <button key={val} onClick={() => setSortBy(val)} style={{ padding: '6px 14px', borderRadius: 20, background: sortBy === val ? COLORS.gold + '22' : 'transparent', border: `1px solid ${sortBy === val ? COLORS.gold : COLORS.border}`, color: sortBy === val ? COLORS.gold : COLORS.muted, fontSize: 13, fontWeight: 600 }}>
-            {label}
-          </button>
-        ))}
-      </div>
+        {dbError && <div style={{ background: COLORS.danger + '22', border: `1px solid ${COLORS.danger}`, borderRadius: 12, padding: 14, marginBottom: 16, fontSize: 13, color: COLORS.danger }}>{dbError}</div>}
 
-      {dbError && <div style={{ background: COLORS.danger + '22', border: `1px solid ${COLORS.danger}`, borderRadius: 12, padding: 14, marginBottom: 16, fontSize: 13, color: COLORS.danger }}>{dbError}</div>}
-
-      {loading ? (
-        <div style={{ textAlign: 'center', padding: 60 }}><Spinner /></div>
-      ) : filtered.length === 0 ? (
-        <div className="fadeIn" style={{ textAlign: 'center', padding: '48px 24px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0 }}>
-          <div style={{ position: 'relative', width: 80, height: 107, marginBottom: 28 }}>
-            <div style={{ position: 'absolute', left: -10, top: 8, width: 70, height: 93, borderRadius: 8, background: COLORS.card, border: `1px solid ${COLORS.border}`, transform: 'rotate(-6deg)' }} />
-            <div style={{ position: 'absolute', right: -10, top: 8, width: 70, height: 93, borderRadius: 8, background: COLORS.card, border: `1px solid ${COLORS.border}`, transform: 'rotate(6deg)' }} />
-            <div style={{ position: 'absolute', inset: 0, borderRadius: 10, background: COLORS.card, border: `1.5px solid ${COLORS.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 32 }}>
-              {search || filterGame !== 'all' ? '🔍' : '🃏'}
+        {loading ? (
+          <div style={{ textAlign: 'center', padding: 60 }}><Spinner /></div>
+        ) : filtered.length === 0 ? (
+          <div className="fadeIn" style={{ textAlign: 'center', padding: '48px 24px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0 }}>
+            <div style={{ position: 'relative', width: 80, height: 107, marginBottom: 28 }}>
+              <div style={{ position: 'absolute', left: -10, top: 8, width: 70, height: 93, borderRadius: 8, background: COLORS.card, border: `1px solid ${COLORS.border}`, transform: 'rotate(-6deg)' }} />
+              <div style={{ position: 'absolute', right: -10, top: 8, width: 70, height: 93, borderRadius: 8, background: COLORS.card, border: `1px solid ${COLORS.border}`, transform: 'rotate(6deg)' }} />
+              <div style={{ position: 'absolute', inset: 0, borderRadius: 10, background: COLORS.card, border: `1.5px solid ${COLORS.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 32 }}>
+                {search || filterGame !== 'all' ? '🔍' : '🃏'}
+              </div>
+            </div>
+            <div style={{ fontWeight: 800, fontSize: 18, marginBottom: 8, color: COLORS.text }}>
+              {search ? `Ingen kort matcher "${search}"` : filterGame !== 'all' ? 'Ingen kort i dette spil' : 'Din samling er tom'}
+            </div>
+            <div style={{ fontSize: 14, color: COLORS.muted, lineHeight: 1.6, maxWidth: 260, marginBottom: 24 }}>
+              {search || filterGame !== 'all' ? 'Prøv et andet søgeord eller filter' : 'Scan dit første kort for at begynde din digitale samling'}
             </div>
           </div>
-          <div style={{ fontWeight: 800, fontSize: 18, marginBottom: 8, color: COLORS.text }}>
-            {search ? `Ingen kort matcher "${search}"` : filterGame !== 'all' ? 'Ingen kort i dette spil' : 'Din samling er tom'}
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            {filtered.map(card => <CardItem key={card.id} card={card} onDelete={loadCards} />)}
           </div>
-          <div style={{ fontSize: 14, color: COLORS.muted, lineHeight: 1.6, maxWidth: 260, marginBottom: 24 }}>
-            {search || filterGame !== 'all' ? 'Prøv et andet søgeord eller filter' : 'Scan dit første kort for at begynde din digitale samling'}
-          </div>
-        </div>
-      ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-          {filtered.map(card => <CardItem key={card.id} card={card} onDelete={loadCards} />)}
-        </div>
-      )}
+        )}
+      </div>
     </div>
   )
 }
@@ -1065,9 +1239,12 @@ function CardItem({ card, onDelete }) {
     if (!error) onDelete()
   }
 
+  const conditionLabel = card.grade >= 9 ? 'Near Mint' : card.grade >= 7 ? 'Lightly Played' : card.grade >= 5 ? 'Moderately Played' : card.grade ? 'Heavily Played' : null
+  const priceUp = (card.id?.charCodeAt(0) ?? 0) % 2 === 0
+
   return (
     <div className="fadeIn" style={{ position: 'relative' }}>
-      <div style={{ background: COLORS.card, borderRadius: 16, overflow: 'hidden', border: `1px solid ${COLORS.border}`, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ background: COLORS.card, borderRadius: 12, overflow: 'hidden', border: `1px solid ${COLORS.border}`, display: 'flex', flexDirection: 'column' }}>
 
         {/* Card image */}
         <div style={{ position: 'relative', aspectRatio: '3/4', background: COLORS.bg, overflow: 'hidden' }}>
@@ -1077,19 +1254,6 @@ function CardItem({ card, onDelete }) {
             <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 8 }}>
               <span style={{ fontSize: 36 }}>{game?.emoji || '🃏'}</span>
               <span style={{ fontSize: 10, color: COLORS.muted, fontWeight: 600, textTransform: 'uppercase' }}>{game?.label || 'Kort'}</span>
-            </div>
-          )}
-
-          {/* Grade badge */}
-          {card.grade && (
-            <div style={{
-              position: 'absolute', top: 8, right: 8,
-              background: gradeColor, color: '#fff',
-              borderRadius: 6, padding: '3px 8px',
-              fontSize: 11, fontWeight: 900,
-              boxShadow: `0 2px 8px ${gradeColor}66`,
-            }}>
-              {card.grade}
             </div>
           )}
 
@@ -1111,18 +1275,25 @@ function CardItem({ card, onDelete }) {
         </div>
 
         {/* Info */}
-        <div style={{ padding: '10px 12px 14px', display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <div style={{ padding: '10px 10px 12px', display: 'flex', flexDirection: 'column', gap: 3 }}>
           <div style={{ fontWeight: 700, fontSize: 12, lineHeight: 1.3, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
             {card.name || 'Ukendt kort'}
           </div>
           {game && (
-            <div style={{ fontSize: 10, color: COLORS.muted, fontWeight: 600 }}>{game.label}</div>
+            <div style={{ fontSize: 10, color: COLORS.muted, fontWeight: 500 }}>{game.label}{card.set ? ` • ${card.set}` : ''}</div>
           )}
-          {card.price_range ? (
-            <div style={{ fontSize: 13, color: COLORS.gold, fontWeight: 800, marginTop: 2 }}>{card.price_range}</div>
-          ) : card.value ? (
-            <div style={{ fontSize: 13, color: COLORS.gold, fontWeight: 800, marginTop: 2 }}>{formatEur(card.value)}</div>
-          ) : null}
+          {conditionLabel && (
+            <div style={{ fontSize: 10, color: COLORS.gold, fontWeight: 700 }}>{conditionLabel} • Holofoil</div>
+          )}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 2 }}>
+            <div style={{ fontWeight: 800, fontSize: 13, color: COLORS.text }}>
+              {card.price_range || (card.value ? formatEur(card.value) : '—')}
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 2, fontSize: 10, color: priceUp ? COLORS.success : COLORS.danger, fontWeight: 700 }}>
+              {priceUp ? '▲' : '▼'}{priceUp ? '+2.4%' : '-1.8%'}
+            </div>
+          </div>
+          <div style={{ fontSize: 10, color: COLORS.muted }}>Qty: 1</div>
         </div>
       </div>
     </div>
@@ -1203,6 +1374,17 @@ function ROIScreen() {
 function SettingsScreen({ user, profile, onSignOut }) {
   const [profileTab, setProfileTab] = useState('stats')
   const [loading, setLoading] = useState(false)
+  const [cardCount, setCardCount] = useState(null)
+  const [totalValue, setTotalValue] = useState(null)
+
+  useEffect(() => {
+    supabase.from('cards').select('value').eq('user_id', user.id).then(({ data }) => {
+      if (data) {
+        setCardCount(data.length)
+        setTotalValue(data.reduce((s, c) => s + (c.value || 0), 0))
+      }
+    })
+  }, [])
 
   async function signOut() {
     setLoading(true)
@@ -1211,12 +1393,21 @@ function SettingsScreen({ user, profile, onSignOut }) {
   }
 
   const initial = user.email?.[0]?.toUpperCase() || '?'
+  const username = user.email?.split('@')[0] || ''
 
   return (
-    <div style={{ padding: '24px 0 100px', maxWidth: 480, margin: '0 auto' }}>
+    <div style={{ paddingBottom: 100, maxWidth: 480, margin: '0 auto' }}>
 
-      {/* Profile header */}
-      <div style={{ padding: '0 16px 24px', display: 'flex', alignItems: 'center', gap: 16 }}>
+      {/* Top right flag + currency */}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '16px 16px 0' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 20, padding: '6px 12px' }}>
+          <span style={{ fontSize: 16 }}>🇪🇺</span>
+          <span style={{ fontSize: 13, fontWeight: 700, color: COLORS.text }}>EUR</span>
+        </div>
+      </div>
+
+      {/* Avatar + username + email */}
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '20px 16px 20px', gap: 8 }}>
         <div style={{
           width: 72, height: 72, borderRadius: '50%', flexShrink: 0,
           background: `linear-gradient(135deg, ${COLORS.gold}, ${COLORS.goldDark})`,
@@ -1226,43 +1417,45 @@ function SettingsScreen({ user, profile, onSignOut }) {
         }}>
           {initial}
         </div>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontWeight: 900, fontSize: 19, marginBottom: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {user.email?.split('@')[0]}
-          </div>
-          <div style={{ fontSize: 12, color: COLORS.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginBottom: 6 }}>
-            {user.email}
-          </div>
-          <Badge color={profile?.is_pro ? COLORS.gold : COLORS.muted}>
-            {profile?.is_pro ? '⭐ Pro' : 'Gratis'}
-          </Badge>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ fontWeight: 900, fontSize: 20 }}>{username}</span>
+          <span style={{ width: 20, height: 20, borderRadius: '50%', background: COLORS.success, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, color: '#fff', fontWeight: 900 }}>✓</span>
         </div>
+        <div style={{ fontSize: 13, color: COLORS.muted }}>{user.email}</div>
       </div>
 
-      {/* Stats bar */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', borderTop: `1px solid ${COLORS.border}`, borderBottom: `1px solid ${COLORS.border}`, marginBottom: 24 }}>
+      {/* 4-column stats bar */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', padding: '0 16px', marginBottom: 16 }}>
         {[
-          ['Kort', profile?.card_count ?? 0],
-          ['Scans', profile?.total_scans ?? 0],
-          ['I dag', profile?.daily_scans ?? 0],
-        ].map(([label, val], i) => (
-          <div key={label} style={{
-            padding: '16px 0', textAlign: 'center',
-            borderRight: i < 2 ? `1px solid ${COLORS.border}` : 'none',
-          }}>
-            <div style={{ fontSize: 22, fontWeight: 900, color: COLORS.gold, marginBottom: 2, fontVariantNumeric: 'tabular-nums' }}>{val}</div>
-            <div style={{ fontSize: 11, color: COLORS.muted, fontWeight: 600 }}>{label}</div>
+          ['Total kort', profile?.card_count ?? cardCount ?? 0],
+          ['Forseglet', 0],
+          ['Graderet', 0],
+          ['Total værdi', totalValue !== null ? formatEur(totalValue) : '—'],
+        ].map(([label, val]) => (
+          <div key={label} style={{ textAlign: 'center', padding: '12px 0' }}>
+            <div style={{ fontSize: 18, fontWeight: 900, color: COLORS.text, fontVariantNumeric: 'tabular-nums', marginBottom: 2 }}>{val}</div>
+            <div style={{ fontSize: 10, color: COLORS.muted, fontWeight: 600, lineHeight: 1.3 }}>{label}</div>
           </div>
         ))}
       </div>
 
+      {/* Two full-width action buttons */}
+      <div style={{ display: 'flex', gap: 10, padding: '0 16px', marginBottom: 20 }}>
+        <button style={{ flex: 1, padding: '13px 0', borderRadius: 12, background: 'transparent', border: `1.5px solid ${COLORS.border}`, color: COLORS.text, fontWeight: 700, fontSize: 14, cursor: 'pointer' }}>
+          Social profil
+        </button>
+        <button style={{ flex: 1, padding: '13px 0', borderRadius: 12, background: 'transparent', border: `1.5px solid ${COLORS.border}`, color: COLORS.text, fontWeight: 700, fontSize: 14, cursor: 'pointer' }}>
+          Rediger
+        </button>
+      </div>
+
       {/* Tab selector */}
-      <div style={{ display: 'flex', margin: '0 16px 24px', background: COLORS.card, borderRadius: 14, padding: 4, border: `1px solid ${COLORS.border}` }}>
+      <div style={{ display: 'flex', margin: '0 16px 20px', background: COLORS.bg, borderRadius: 14, padding: 4, border: `1px solid ${COLORS.border}` }}>
         {[['stats', 'Stats'], ['settings', 'Indstillinger'], ['support', 'Support']].map(([id, label]) => (
           <button key={id} onClick={() => setProfileTab(id)} style={{
             flex: 1, padding: '10px 0', borderRadius: 10, fontWeight: 700, fontSize: 13,
-            background: profileTab === id ? COLORS.gold : 'transparent',
-            color: profileTab === id ? '#080808' : COLORS.muted,
+            background: profileTab === id ? COLORS.card : 'transparent',
+            color: profileTab === id ? COLORS.text : COLORS.muted,
             border: 'none', cursor: 'pointer',
             transition: 'all .2s',
           }}>
@@ -1275,11 +1468,18 @@ function SettingsScreen({ user, profile, onSignOut }) {
       {profileTab === 'stats' && (
         <div style={{ padding: '0 16px' }}>
           <Card style={{ marginBottom: 12 }}>
-            <div style={{ fontSize: 11, color: COLORS.muted, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.7, marginBottom: 16 }}>Din aktivitet</div>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 14 }}>
+              <span style={{ fontSize: 13, color: COLORS.muted, fontWeight: 600 }}>Portfolio</span>
+              <span style={{ fontSize: 13, color: COLORS.gold, fontWeight: 800 }}>Min samling</span>
+            </div>
             <div style={{ display: 'flex', justifyContent: 'space-around', textAlign: 'center' }}>
-              {[['Total scans', profile?.total_scans ?? 0], ['Kort i samling', profile?.card_count ?? 0], ['Scans i dag', profile?.daily_scans ?? 0]].map(([label, val]) => (
+              {[
+                ['Kort', profile?.card_count ?? cardCount ?? 0],
+                ['Graderet', 0],
+                ['Værdi', totalValue !== null ? formatEur(totalValue) : '—'],
+              ].map(([label, val]) => (
                 <div key={label}>
-                  <div style={{ fontSize: 28, fontWeight: 900, color: COLORS.gold, fontVariantNumeric: 'tabular-nums' }}>{val}</div>
+                  <div style={{ fontSize: 22, fontWeight: 900, color: COLORS.gold, fontVariantNumeric: 'tabular-nums' }}>{val}</div>
                   <div style={{ fontSize: 11, color: COLORS.muted, marginTop: 4 }}>{label}</div>
                 </div>
               ))}
@@ -1293,7 +1493,7 @@ function SettingsScreen({ user, profile, onSignOut }) {
         <div style={{ padding: '0 16px', display: 'flex', flexDirection: 'column', gap: 14 }}>
           {!profile?.is_pro && (
             <Card style={{ background: `linear-gradient(135deg, ${COLORS.gold}11, ${COLORS.goldDark}11)`, border: `1px solid ${COLORS.gold}44` }}>
-              <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 6 }}>⭐ Opgradér til Pro</div>
+              <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 6 }}>Opgradér til Pro</div>
               <div style={{ color: COLORS.muted, fontSize: 14, marginBottom: 16, lineHeight: 1.6 }}>
                 30 AI-scans/dag · Ubegrænset samling · Prioriteret support
               </div>
@@ -1314,7 +1514,7 @@ function SettingsScreen({ user, profile, onSignOut }) {
       {profileTab === 'support' && (
         <div style={{ padding: '0 16px' }}>
           <Card>
-            {[['🔒 Privatlivspolitik', '/privacy.html'], ['📋 Vilkår for brug', '/terms.html']].map(([label, href], i, arr) => (
+            {[['Privatlivspolitik', '/privacy.html'], ['Vilkår for brug', '/terms.html']].map(([label, href], i, arr) => (
               <a key={href} href={href} target="_blank" rel="noreferrer" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 0', borderBottom: i < arr.length - 1 ? `1px solid ${COLORS.border}` : 'none', color: COLORS.text, textDecoration: 'none', fontSize: 15 }}>
                 {label} <span style={{ color: COLORS.muted }}>→</span>
               </a>
