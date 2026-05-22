@@ -866,7 +866,7 @@ function SVGAreaChart({ points, width = 480, height = 160 }) {
 }
 
 // HOME SCREEN
-function HomeScreen({ user, profile, onGoScan }) {
+function HomeScreen({ user, profile, onGoScan, onViewAll }) {
   const [cards, setCards] = useState([])
   const [loading, setLoading] = useState(true)
   const [hideValue, setHideValue] = useState(false)
@@ -989,42 +989,34 @@ function HomeScreen({ user, profile, onGoScan }) {
         {/* Most valuable */}
         {!loading && topCards.length > 0 && (
           <div style={{ marginBottom: 24 }}>
-            <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 14 }}>Mest værdifulde</div>
-            <div style={{ background: COLORS.card, borderRadius: 16, border: `1px solid ${COLORS.border}`, overflow: 'hidden' }}>
-              {topCards.map((card, i) => {
+            <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 12 }}>Mest værdifulde</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {topCards.map((card) => {
                 const game = GAMES.find(g => g.id === card.game)
-                const gradeColor = card.grade >= 9 ? COLORS.success : card.grade >= 7 ? COLORS.gold : card.grade >= 5 ? '#e67e22' : COLORS.danger
+                const condition = card.grade >= 9 ? 'Near Mint' : card.grade >= 7 ? 'Lightly Played' : card.grade >= 5 ? 'Moderately Played' : card.grade ? 'Heavily Played' : null
+                const conditionColor = card.grade >= 9 ? COLORS.success : card.grade >= 7 ? COLORS.gold : card.grade >= 5 ? '#e67e22' : COLORS.danger
                 return (
                   <div key={card.id} style={{
-                    display: 'flex', alignItems: 'center', gap: 12,
+                    display: 'flex', alignItems: 'center',
                     padding: '14px 16px',
-                    borderBottom: i < topCards.length - 1 ? `1px solid ${COLORS.border}` : 'none',
+                    borderRadius: 14,
+                    background: COLORS.card,
+                    border: `1px solid ${COLORS.gold}33`,
                   }}>
-                    <div style={{ width: 36, height: 48, borderRadius: 6, overflow: 'hidden', flexShrink: 0, background: COLORS.bg, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                      {card.image_url ? (
-                        <img src={card.image_url} alt={card.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                      ) : (
-                        <span style={{ fontSize: 20 }}>{game?.emoji || '🃏'}</span>
-                      )}
-                    </div>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontWeight: 700, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <div style={{ fontWeight: 700, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginBottom: 3 }}>
                         {card.name || 'Ukendt kort'}
                       </div>
-                      <div style={{ fontSize: 11, color: COLORS.muted, marginTop: 2 }}>
-                        {game?.label || card.game}{card.grade ? ` • Grade ${card.grade}` : ''}
+                      <div style={{ fontSize: 12, color: COLORS.muted }}>
+                        {game?.label || card.game}
+                        {condition && <span style={{ color: conditionColor }}> • {condition}</span>}
                       </div>
                     </div>
-                    <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                      <div style={{ fontWeight: 800, fontSize: 14 }}>{formatEur(card.value)}</div>
+                    <div style={{ textAlign: 'right', flexShrink: 0, marginLeft: 12 }}>
+                      <div style={{ fontWeight: 800, fontSize: 15 }}>{formatEur(card.value)}</div>
                       {card.grade && (
-                        <div style={{
-                          display: 'inline-block', marginTop: 4,
-                          background: gradeColor + '22', color: gradeColor,
-                          border: `1px solid ${gradeColor}44`,
-                          borderRadius: 6, padding: '2px 7px', fontSize: 11, fontWeight: 700,
-                        }}>
-                          {card.grade}
+                        <div style={{ fontSize: 11, color: COLORS.muted, marginTop: 2 }}>
+                          PSA est. {card.grade}
                         </div>
                       )}
                     </div>
@@ -1032,7 +1024,7 @@ function HomeScreen({ user, profile, onGoScan }) {
                 )
               })}
             </div>
-            <button style={{ display: 'block', width: '100%', textAlign: 'center', marginTop: 12, color: COLORS.gold, fontWeight: 700, fontSize: 14, background: 'none', border: 'none', cursor: 'pointer' }}>
+            <button onClick={onViewAll} style={{ display: 'block', width: '100%', textAlign: 'center', marginTop: 14, color: COLORS.gold, fontWeight: 700, fontSize: 14, background: 'none', border: 'none', cursor: 'pointer' }}>
               Se alle →
             </button>
           </div>
@@ -1558,13 +1550,19 @@ function BottomNav({ tab, setTab }) {
 
   return (
     <div style={{
-      position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 100,
-      background: 'rgba(16,16,16,0.97)',
-      borderTop: `1px solid ${COLORS.border}`,
+      position: 'fixed',
+      bottom: `calc(12px + env(safe-area-inset-bottom))`,
+      left: 16, right: 16,
+      zIndex: 100,
+      background: 'rgba(12,12,12,0.82)',
+      borderRadius: 32,
+      border: '1px solid rgba(255,255,255,0.07)',
       display: 'flex',
-      paddingBottom: 'env(safe-area-inset-bottom)',
-      backdropFilter: 'blur(20px)',
-      WebkitBackdropFilter: 'blur(20px)',
+      alignItems: 'center',
+      padding: '6px 8px',
+      backdropFilter: 'blur(28px)',
+      WebkitBackdropFilter: 'blur(28px)',
+      boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
     }}>
       {tabs.map(t => {
         const isActive = tab === t.id
@@ -1575,16 +1573,17 @@ function BottomNav({ tab, setTab }) {
             aria-label={t.label}
             aria-current={isActive ? 'page' : undefined}
             style={{
-              flex: 1, padding: '10px 0 8px',
+              flex: 1, padding: '8px 0 6px',
               display: 'flex', flexDirection: 'column',
-              alignItems: 'center', gap: 4,
+              alignItems: 'center', gap: 3,
               background: 'none', border: 'none',
+              cursor: 'pointer',
             }}
           >
             <div style={{
-              width: 48, height: 32, borderRadius: 16,
+              width: 44, height: 30, borderRadius: 15,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              background: isActive ? COLORS.gold + '22' : 'transparent',
+              background: isActive ? COLORS.gold + '20' : 'transparent',
               transition: 'background .2s',
             }}>
               {t.icon(isActive)}
@@ -1728,7 +1727,7 @@ export default function App() {
   return (
     <ErrorBoundary>
       <div style={{ background: COLORS.bg, minHeight: '100dvh' }}>
-        {tab === 'home' && <HomeScreen user={session.user} profile={profile} onGoScan={() => setTab('scan')} />}
+        {tab === 'home' && <HomeScreen user={session.user} profile={profile} onGoScan={() => setTab('scan')} onViewAll={() => setTab('collection')} />}
         {tab === 'scan' && <ScanScreen user={session.user} profile={profile} onScanDone={() => loadProfile(session.user.id)} />}
         {tab === 'collection' && <CollectionScreen user={session.user} />}
         {tab === 'settings' && <SettingsScreen user={session.user} profile={profile} onSignOut={() => setSession(null)} />}
