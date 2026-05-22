@@ -1573,34 +1573,33 @@ function SearchScreen({ onSelectGame }) {
                 key={game.id}
                 onClick={() => onSelectGame(game.id)}
                 style={{
-                  background: '#141414',
-                  border: `1px solid #2a2a2a`,
+                  background: `radial-gradient(ellipse at 30% 30%, ${game.color}25 0%, #111 65%)`,
+                  border: `1px solid ${game.color}40`,
                   borderRadius: 16,
                   height: 110,
                   display: 'flex', flexDirection: 'column',
                   alignItems: 'center', justifyContent: 'center',
                   gap: 8, cursor: 'pointer',
                   position: 'relative', overflow: 'hidden',
-                  padding: '16px 20px',
+                  padding: '14px 12px 10px',
                 }}
               >
-                {hasLogo ? (
-                  <img
-                    src={logoUrl}
-                    alt={game.label}
-                    onError={() => setImgErrors(e => ({ ...e, [game.id]: true }))}
-                    style={{
-                      maxWidth: '85%', maxHeight: 60,
-                      objectFit: 'contain',
-                      filter: game.id === 'yugioh' || game.id === 'onepiece' ? 'brightness(1.1)' : 'none',
-                    }}
-                  />
-                ) : (
-                  <>
-                    <span style={{ fontSize: 36, lineHeight: 1 }}>{game.emoji}</span>
-                    <div style={{ fontWeight: 800, fontSize: 12, color: COLORS.text, textAlign: 'center' }}>{game.label}</div>
-                  </>
-                )}
+                <div style={{ width: '100%', height: 56, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  {hasLogo ? (
+                    <img
+                      src={logoUrl}
+                      alt={game.label}
+                      referrerPolicy="no-referrer"
+                      onError={() => setImgErrors(e => ({ ...e, [game.id]: true }))}
+                      style={{ maxWidth: '88%', maxHeight: 54, width: 'auto', height: 'auto', objectFit: 'contain' }}
+                    />
+                  ) : (
+                    <span style={{ fontSize: 34, lineHeight: 1 }}>{game.emoji}</span>
+                  )}
+                </div>
+                <div style={{ fontSize: 10, fontWeight: 700, color: `${game.color}cc`, textTransform: 'uppercase', letterSpacing: 0.8, textAlign: 'center' }}>
+                  {game.label}
+                </div>
               </button>
             )
           })}
