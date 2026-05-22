@@ -71,11 +71,11 @@ export default async function handler(req) {
 
   if (profile.is_pro) {
     if (dailyCount >= 30) {
-      return new Response(JSON.stringify({ error: 'Daglig grænse nået (30 scans). Prøv igen i morgen.' }), { status: 429 })
+      return new Response(JSON.stringify({ error: 'Daily limit reached (30 scans). Try again tomorrow.' }), { status: 429 })
     }
   } else {
     if (profile.total_scans >= 3) {
-      return new Response(JSON.stringify({ error: 'Du har brugt dine 3 gratis scans. Opgradér til Pro for ubegrænsede scans.' }), { status: 429 })
+      return new Response(JSON.stringify({ error: 'You have used your 3 free scans. Upgrade to Pro for unlimited scans.' }), { status: 429 })
     }
   }
 
@@ -99,10 +99,10 @@ export default async function handler(req) {
   }
 
   if (!frontImage || !isValidImage(frontImage)) {
-    return new Response(JSON.stringify({ error: 'Ugyldigt eller manglende billede (maks 5 MB)' }), { status: 400 })
+    return new Response(JSON.stringify({ error: 'Invalid or missing image (max 5 MB)' }), { status: 400 })
   }
   if (backImage && !isValidImage(backImage)) {
-    return new Response(JSON.stringify({ error: 'Bagbillede ugyldigt (maks 5 MB)' }), { status: 400 })
+    return new Response(JSON.stringify({ error: 'Back image invalid (max 5 MB)' }), { status: 400 })
   }
 
   const prompt = buildPrompt(game, !!backImage)
@@ -133,13 +133,13 @@ export default async function handler(req) {
       })
     })
   } catch (e) {
-    return new Response(JSON.stringify({ error: 'AI-tjeneste utilgængelig' }), { status: 502 })
+    return new Response(JSON.stringify({ error: 'AI service unavailable' }), { status: 502 })
   }
 
   if (!anthropicRes.ok) {
     const err = await anthropicRes.text()
     console.error('Anthropic error:', err)
-    return new Response(JSON.stringify({ error: 'AI-analyse fejlede' }), { status: 502 })
+    return new Response(JSON.stringify({ error: 'AI analysis failed' }), { status: 502 })
   }
 
   const aiData = await anthropicRes.json()
@@ -238,24 +238,25 @@ function buildPrompt(game, hasBack) {
   }
   const gameName = gameNames[game] || game || 'TCG'
 
-  return `Du er ekspert i ${gameName} kortgradéring efter PSA-standarden. Analyser ${hasBack ? 'disse to billeder (forside og bagside)' : 'dette kortbillede'} og giv en professionel PSA-gradéringsvurdering.
+  return `You are an expert in ${gameName} card identification and market value. Analyze ${hasBack ? 'these two images (front and back)' : 'this card image'} and identify the card precisely.
 
-Returner KUN dette JSON-objekt — ingen tekst før eller efter, ingen markdown, ingen kodeblokke:
+The card is assumed to be in Near Mint (NM) condition — estimate market value based on Near Mint prices.
+
+Return ONLY this JSON object — no text before or after, no markdown, no code blocks:
 {
-  "cardName": "<kortets navn præcis som vist på kortet>",
-  "cardNumber": "<kortnummer f.eks. 45/165 eller blot 45 — null hvis ikke synligt>",
-  "setName": "<sætnavn f.eks. Obsidian Flames eller Base Set — null hvis ukendt>",
-  "finish": "<én af: Normal | Holofoil | Reverse Holo | Full Art | Secret Rare | Rainbow Rare | Gold Card | First Edition | Unlimited | null>",
-  "estimatedGrade": <tal 1-10>,
-  "confidence": "<Høj|Middel|Lav>",
-  "centering": "<beskrivelse>",
-  "corners": "<beskrivelse>",
-  "edges": "<beskrivelse>",
-  "surface": "<beskrivelse>",
-  "mainIssues": ["<issue1>", "<issue2>"],
+  "cardName": "<card name exactly as shown on the card>",
+  "cardNumber": "<card number e.g. 45/165 or just 45 — null if not visible>",
+  "setName": "<set name e.g. Obsidian Flames or Base Set — null if unknown>",
+  "finish": "<one of: Normal | Holo Rare | Reverse Holo | Full Art | Secret Rare | Hyper Rare | Special Illustration Rare | Illustration Rare | Gold Secret Rare | Amazing Rare | Shiny Rare | Radiant Rare | Prism Star | 1st Edition | Shadowless | Promo | null>",
+  "confidence": "<High|Mid|Low>",
+  "centering": "<description of centering>",
+  "corners": "<description of corners>",
+  "edges": "<description of edges>",
+  "surface": "<description of surface>",
+  "mainIssues": ["<visible issue1 if any>"],
   "worthGrading": <true|false>,
-  "estimatedPSAValue": "<EUR-interval f.eks. 50-80€>",
+  "estimatedPSAValue": "<Near Mint market value in EUR e.g. 50-80€>",
   "gradingFee": "~25€",
-  "recommendation": "<kort anbefaling på dansk>"
+  "recommendation": "<short recommendation in English>"
 }`
 }
