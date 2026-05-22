@@ -1520,12 +1520,12 @@ function SettingsScreen({ user, profile, onSignOut }) {
 }
 
 const GAME_LOGOS = {
-  pokemon:    'https://upload.wikimedia.org/wikipedia/commons/1/1a/Pok%C3%A9mon_Trading_Card_Game_logo.svg',
-  mtg:        'https://images.ctfassets.net/s5n2t79q9icq/3dB5uyWzUH95O1ZPBNNUX5/6cff7c65a809285755ea24b164b6ac65/magic-logo.png',
-  yugioh:     'https://upload.wikimedia.org/wikipedia/commons/2/21/Yu-Gi-Oh%21.png',
-  onepiece:   'https://upload.wikimedia.org/wikipedia/commons/6/6c/One_piece_logo.svg',
-  dragonball: 'https://upload.wikimedia.org/wikipedia/commons/d/d5/DBSlogo-01.png',
-  lorcana:    'https://upload.wikimedia.org/wikipedia/en/0/08/Disney_Lorcana_Logo.png',
+  pokemon:    '/logos/pokemon.svg',
+  mtg:        '/logos/mtg.png',
+  yugioh:     '/logos/yugioh.svg',
+  onepiece:   '/logos/onepiece.png',
+  dragonball: '/logos/dragonball.png',
+  lorcana:    '/logos/lorcana.png',
 }
 
 // SEARCH SCREEN
@@ -1591,7 +1591,11 @@ function SearchScreen({ onSelectGame }) {
                       alt={game.label}
                       referrerPolicy="no-referrer"
                       onError={() => setImgErrors(e => ({ ...e, [game.id]: true }))}
-                      style={{ maxWidth: '88%', maxHeight: 54, width: 'auto', height: 'auto', objectFit: 'contain' }}
+                      style={{
+                        maxWidth: game.id === 'dragonball' ? '96%' : '88%',
+                        maxHeight: game.id === 'dragonball' ? 62 : 54,
+                        width: 'auto', height: 'auto', objectFit: 'contain',
+                      }}
                     />
                   ) : (
                     <span style={{ fontSize: 34, lineHeight: 1 }}>{game.emoji}</span>
