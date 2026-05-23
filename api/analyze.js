@@ -166,6 +166,26 @@ export default async function handler(req) {
       const setName = parsed.setName || null
       debugInfo.cardName = cardName
 
+      // Number-based finish override — card number in premium zone cannot be Holo/Normal
+      // e.g. 191/197 = 97% → must be SIR/IR/Secret, not Holo Rare
+      let parsedFinishOverride = null
+      if (parsed.finish && cardNumber?.includes('/') && game === 'pokemon') {
+        const parts = cardNumber.split('/')
+        const num = parseInt(parts[0].replace(/\D/g, ''), 10)
+        const total = parseInt(parts[1].replace(/\D/g, ''), 10)
+        const NON_PREMIUM = ['Normal', 'Holo Rare', 'Reverse Holo', 'Common', 'Uncommon']
+        if (!isNaN(num) && !isNaN(total) && total > 0 && NON_PREMIUM.includes(parsed.finish)) {
+          const ratio = num / total
+          if (ratio > 0.80) {
+            parsedFinishOverride = 'Special Illustration Rare'
+            debugInfo.finishOverride = `${parsed.finish}→SIR (${num}/${total}=${Math.round(ratio*100)}%)`
+          } else if (num > total) {
+            parsedFinishOverride = 'Secret Rare'
+            debugInfo.finishOverride = `${parsed.finish}→Secret (${num}>${total})`
+          }
+        }
+      }
+
       const CATALOG_GAMES = ['pokemon', 'mtg', 'yugioh']
 
       if (cardName && CATALOG_GAMES.includes(game)) {
@@ -247,7 +267,7 @@ export default async function handler(req) {
           'Normal':                    'rarity:"Common"',
           'Reverse Holo':              'rarity:"Common" OR rarity:"Uncommon" OR rarity:"Rare"',
         }
-        const parsedFinish = parsed.finish || null
+        const parsedFinish = parsedFinishOverride || parsed.finish || null
         const rarityQuery = finishRarityQuery[parsedFinish] || null
 
         // Strategy 0 (Pokémon only): pokemontcg.io live lookup with multi-result best-pick
@@ -527,13 +547,26 @@ CARD NUMBER — CRITICAL: The second image is an enlarged crop of the bottom of 
 
 SET NAME — CRITICAL: Read the SPECIFIC set name from the copyright line at the very bottom of the card (e.g. "Obsidian Flames", "Paradox Rift", "Paldean Fates", "Temporal Forces"). Do NOT return a series name like "Scarlet & Violet" — return the exact product name printed on the card.
 
-FINISH — MUST always be identified from visual appearance (never return null for Pokémon):
-- Full painted illustration bleeding to card edges, no standard frame = Special Illustration Rare or Illustration Rare
-- Art extends to all edges with rainbow shimmer or gold border = Hyper Rare or Full Art
-- Standard card frame with holofoil pattern in artwork area = Holo Rare
-- Standard frame with foil on non-art areas only = Reverse Holo
-- Standard frame, no foil anywhere = Normal
-- Number clearly exceeds set total = Secret Rare or higher
+FINISH — Identify using BOTH the card number AND visual appearance. Number is more reliable than visual on foil cards.
+
+STEP 1 — NUMBER CHECK (most reliable, do this first):
+- If card number X/Y where X ÷ Y > 0.80 (e.g. 191/197 = 97%) → card is in premium zone, cannot be Normal/Holo/Reverse Holo
+- If X > Y entirely (e.g. 215/197) → definitely Secret/Special Rare
+
+STEP 2 — VISUAL IDENTIFICATION (use these exact rules):
+★ Special Illustration Rare (SIR): The illustration covers the ENTIRE card face from edge to edge. You CANNOT see a rectangular border around the artwork. The Pokémon name appears as small white/metallic text floating directly over the illustration. The card background bleeds to all four edges. Attack/ability boxes appear as translucent overlays on the art. Dark cosmic, galaxy, nature scenes with no card frame = SIR.
+★ Illustration Rare (IR): Art extends significantly beyond the standard art box but the card name area at the TOP still has partial standard frame elements. The overall layout is "partially standard, partially extended art."
+★ Hyper Rare: Entire card including text has rainbow gradient shimmer. Standard card frame still visible underneath the rainbow effect.
+★ Gold Secret Rare: Gold-colored card border, number exceeds set total, metallic gold text.
+★ Holo Rare: Standard rectangular art box is CLEARLY VISIBLE. Holofoil pattern appears ONLY inside the artwork rectangle. Card name, HP bar, and all text areas are in the standard non-holo layout. The border of the art box is always visible.
+★ Reverse Holo: Standard card layout with a holofoil shimmer on the CARD BORDER and TEXT AREAS, but the artwork itself is flat/non-holo.
+★ Normal / Common / Uncommon: No holofoil anywhere on the card.
+★ Promo: A "PROMO" stamp or special event logo is printed on the card.
+
+CRITICAL DISTINCTION — SIR vs Holo Rare:
+- Holo Rare ALWAYS has a visible rectangular border around the artwork. You can see where the art box starts and ends.
+- SIR NEVER has an art box border. The illustration is the entire card. If you see a dark/cosmic/artistic background with no visible art box rectangle = SIR, not Holo Rare.
+- A card cannot be Holo Rare if its number is above 80% of the set total.
 
 The card is assumed Near Mint — estimate market value at NM prices.
 
