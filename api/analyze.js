@@ -275,6 +275,8 @@ export default async function handler(req) {
             'Diamond & Pearl': 'dp1',
           }
 
+          debugInfo.hasApiKey = !!PTCG_API_KEY
+
           const queryPtcg = async (q, size = 10) => {
             const url = `https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(q)}&orderBy=-set.releaseDate&pageSize=${size}&select=id,images,cardmarket,set,rarity,number`
             const r = await fetch(url, { headers: ptcgHeaders })
@@ -286,28 +288,35 @@ export default async function handler(req) {
           // Pick best card from a list of candidates
           const pickBest = (cards, targetRarityStr, targetNums) => {
             if (!cards.length) return null
+            // English-only list (Japanese set IDs typically start with r, j, or have jp/ko suffix)
+            const englishCards = cards.filter(c => {
+              const sid = c.set?.id || ''
+              return !sid.startsWith('rsv') && !sid.startsWith('svsv') && c.set?.series !== 'Japanese'
+            })
+            const pool = englishCards.length ? englishCards : cards
+
             // 1. Number + rarity exact match
             if (targetNums?.length && targetRarityStr) {
               for (const num of targetNums) {
-                const m = cards.find(c => c.number === num && c.rarity?.toLowerCase().includes(targetRarityStr.toLowerCase().split(' ')[0]))
+                const m = pool.find(c => c.number === num && c.rarity?.toLowerCase().includes(targetRarityStr.toLowerCase().split(' ')[0]))
                 if (m) return m
               }
             }
             // 2. Exact number match (any rarity)
             if (targetNums?.length) {
               for (const num of targetNums) {
-                const m = cards.find(c => c.number === num)
+                const m = pool.find(c => c.number === num)
                 if (m) return m
               }
             }
-            // 3. Rarity match — pick newest (first in list since ordered by -releaseDate)
+            // 3. Rarity match — newest English card with matching rarity
             if (targetRarityStr) {
-              const keyword = targetRarityStr.toLowerCase().split(' ')[0] // "special", "illustration", "holo", etc.
-              const m = cards.find(c => c.rarity?.toLowerCase().includes(keyword))
+              const keyword = targetRarityStr.toLowerCase().split(' ')[0]
+              const m = pool.find(c => c.rarity?.toLowerCase().includes(keyword))
               if (m) return m
             }
-            // 4. Newest card (first result)
-            return cards[0]
+            // 4. Newest English card (pool[0] since ordered by -releaseDate)
+            return pool[0]
           }
 
           const ptcgRarityStr = parsedFinish ? finishToRarity(parsedFinish) : null

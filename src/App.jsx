@@ -895,9 +895,9 @@ function GradeResult({ result, game, frontImg, user, onSave }) {
             <div>AI number: <b style={{ color: result.cardNumber ? COLORS.success : COLORS.danger }}>{result.cardNumber || 'null'}</b></div>
             <div>AI set: <b style={{ color: '#fff' }}>{result.setName || '—'}</b></div>
             <div>AI finish: <b style={{ color: result.finish ? COLORS.success : COLORS.danger }}>{result.finish || 'null'}</b></div>
-            <div>ptcg: <b style={{ color: '#fff' }}>{result._debug.ptcgQ || '—'}</b> · <b style={{ color: result._debug.ptcgCount > 0 ? COLORS.success : COLORS.danger }}>{result._debug.ptcgCount ?? '?'} hits</b></div>
+            <div>API key: <b style={{ color: result._debug.hasApiKey ? COLORS.success : COLORS.danger }}>{result._debug.hasApiKey ? 'YES ✓' : 'NO ✗'}</b> · ptcg: <b style={{ color: '#fff' }}>{result._debug.ptcgQ || '—'}</b> · <b style={{ color: result._debug.ptcgCount > 0 ? COLORS.success : COLORS.danger }}>{result._debug.ptcgCount ?? '?'} hits</b></div>
             <div>Strategy: <b style={{ color: '#fff' }}>{result._debug.source || '—'}</b> · Catalog ID: <b style={{ color: '#fff' }}>{result.catalogId || '—'}</b></div>
-            {result._debug.ptcgStatus && <div style={{ color: '#e67e22' }}>ptcg HTTP {result._debug.ptcgStatus}</div>}
+            {result._debug.ptcgStatus && <div style={{ color: '#e67e22' }}>ptcg HTTP {result._debug.ptcgStatus} (Vercel IP blokeret?)</div>}
             {result._debug.ptcgError && <div style={{ color: COLORS.danger }}>ptcg err: {result._debug.ptcgError}</div>}
             {result._debug.error && <div style={{ color: COLORS.danger }}>err: {result._debug.error}</div>}
           </div>

@@ -1,4 +1,4 @@
-// Cleanup SW v2 — clears all caches, forces a page reload via fresh network fetch,
+// Cleanup SW v3 — clears all caches, forces a page reload via fresh network fetch,
 // then self-destructs. Kept alive so browsers with the old caching SW receive
 // this update and get kicked to the new bundle automatically.
 // Safe to delete after 60+ days with no complaints.
