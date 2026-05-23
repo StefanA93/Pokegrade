@@ -629,15 +629,37 @@ export default async function handler(req) {
               // in the same set — it exists at a different (lower) card number
               if (aiSaysUltraRare && ptcgSaysPremium && best.set?.id) {
                 try {
-                  const urNames = [...new Set([ptcgCardName, svExName, cardName, megaSvExName].filter(Boolean))]
                   let urCommit = null
+
+                  // Pass A: name-based UR search — verify rarity is exactly "Rare Ultra"
+                  const urNames = [...new Set([ptcgCardName, svExName, cardName, megaSvExName].filter(Boolean))]
                   for (const n of urNames) {
                     if (urCommit) break
                     const hits = await queryPtcg(
                       `name:"${n}" set.id:${best.set.id} rarity:"Rare Ultra"`, 3
                     )
-                    if (hits.length) urCommit = hits[0]
+                    const validHit = hits.find(c => /^Rare Ultra$/i.test(c.rarity || ''))
+                    if (validHit) urCommit = validHit
                   }
+
+                  // Pass B: set.id + card number — most direct, bypasses name format entirely
+                  // e.g. set.id:me1 number:002 → finds the Ultra Rare at that exact position
+                  if (!urCommit && cardNumber) {
+                    const rawNum2 = cardNumber.split('/')[0].trim()
+                    const stripped2 = rawNum2.replace(/^0+(?=\d)/, '')
+                    const numsToTry = stripped2 !== rawNum2 ? [rawNum2, stripped2] : [rawNum2]
+                    for (const n of numsToTry) {
+                      if (urCommit) break
+                      const numHits = await queryPtcg(`set.id:${best.set.id} number:${n}`, 3)
+                      // Accept only if it's NOT another SIR/IR/premium that we're already on
+                      const urHit = numHits.find(c => /^Rare Ultra$/i.test(c.rarity || ''))
+                      if (urHit) {
+                        urCommit = urHit
+                        debugInfo.ptcgUrNumHit = `${best.set.id}#${n}→${urHit.id}`
+                      }
+                    }
+                  }
+
                   if (urCommit) {
                     commitCard = urCommit
                     debugInfo.ptcgUrFallback = `SIR→UR: ${best.id}→${urCommit.id}`
@@ -657,6 +679,7 @@ export default async function handler(req) {
               verifiedSetName = commitCard.set?.name || null
               verifiedNumber = commitCard.number || null
               debugInfo.verified = `${verifiedRarity} · ${verifiedSetName} · #${verifiedNumber}`
+              debugInfo.rarityDbg = `aiUR:${aiSaysUltraRare} ptcgPrem:${ptcgSaysPremium} urFb:${debugInfo.ptcgUrFallback || 'none'} → ${verifiedRarity}`
             } else if (best) {
               debugInfo.ptcgSkipped = `skipped ${best.id}: score ${ptcgScore}%<${MIN_PTCG_SCORE}%`
             }
