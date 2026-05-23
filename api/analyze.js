@@ -377,8 +377,12 @@ export default async function handler(req) {
             ptcgCardName = ptcgCardName.replace(/\s+EX$/i, '-EX') // " EX" → "-EX" at end
           }
           if (ptcgCardName !== cardName) debugInfo.ptcgNameNorm = `${cardName}→${ptcgCardName}`
-          // SV-era sets may store "M X-EX" as "M X ex" (lowercase suffix, no hyphen)
+          // SV-era sets may store "M X-EX" as "M X ex" (abbreviated, lowercase suffix)
           const svExName = ptcgCardName.replace(/-EX$/i, ' ex')
+          // SV-era Mega sets (e.g. me1) may store as "Mega X ex" (full "Mega" + lowercase ex)
+          const megaSvExName = (cardName && /^Mega\s+/i.test(cardName))
+            ? cardName.replace(/[\s-]+EX$/i, ' ex')  // "Mega Venusaur-EX" → "Mega Venusaur ex"
+            : null
 
           const ERA_TO_SET_PREFIX = {
             'SV': 'sv', 'SWSH': 'swsh', 'SM': 'sm', 'XY': 'xy',
@@ -507,10 +511,11 @@ export default async function handler(req) {
             if (!candidates.length && cardNumber) {
               const rawNum = cardNumber.split('/')[0].trim()
               const strippedNum = rawNum.replace(/^0+(?=\d)/, '')
-              // Try all name variants: normalized, SV-era lowercase ex, original
+              // Try all name variants: normalized, SV abbreviated ex, original, SV full Mega ex
               const nameQuerySet = new Set([ptcgCardName])
               if (svExName !== ptcgCardName) nameQuerySet.add(svExName)
               if (cardName !== ptcgCardName) nameQuerySet.add(cardName)
+              if (megaSvExName && !nameQuerySet.has(megaSvExName)) nameQuerySet.add(megaSvExName)
               const nameQueries = [...nameQuerySet]
               for (const n of nameQueries) {
                 if (candidates.length) break
@@ -604,10 +609,18 @@ export default async function handler(req) {
             debugInfo.ptcgCount = candidates.length
 
             const best = pickBest(candidates, ptcgRarityStr, nums.length ? nums : null, normSet, ability, attacks, hp)
-            // Only commit to PTCG result if score is high enough (≥45%) when scoring path was used.
-            const MIN_PTCG_SCORE = 45
+            // Ability-only / attack-only passes are last resorts with very low signal precision.
+            // Require a much higher score (70%) to commit — needs ability + attacks + HP all matching.
+            const isLatePass = /ability-only|attack-only/.test(debugInfo.ptcgQ || '')
+            // Only commit to PTCG result if score is high enough (≥45%, or ≥70% for late passes).
+            const MIN_PTCG_SCORE = isLatePass ? 70 : 45
             const ptcgScore = debugInfo.pickScore // percentage (0-100), undefined if fallback path
-            if (best && (ptcgScore === undefined || ptcgScore >= MIN_PTCG_SCORE)) {
+            // When ptcgScore is undefined the fallback (rarity/number match without signal scoring) fired.
+            // Still gate on MIN_PTCG_SCORE for late passes to avoid committing low-confidence late results.
+            const scoreOk = ptcgScore !== undefined
+              ? ptcgScore >= MIN_PTCG_SCORE
+              : !isLatePass  // undefined score on late pass = no commit
+            if (best && scoreOk) {
               let commitCard = best
               const aiSaysUltraRare = parsedFinish === 'Ultra Rare'
               const ptcgSaysPremium = /Special Illustration|Illustration Rare|Rare Rainbow/i.test(best.rarity || '')
@@ -616,7 +629,7 @@ export default async function handler(req) {
               // in the same set — it exists at a different (lower) card number
               if (aiSaysUltraRare && ptcgSaysPremium && best.set?.id) {
                 try {
-                  const urNames = [...new Set([ptcgCardName, svExName, cardName].filter(Boolean))]
+                  const urNames = [...new Set([ptcgCardName, svExName, cardName, megaSvExName].filter(Boolean))]
                   let urCommit = null
                   for (const n of urNames) {
                     if (urCommit) break
@@ -875,10 +888,11 @@ CRITICAL RULES:
 
 The card is assumed Near Mint — estimate market value at NM prices.
 
-ABILITY & ATTACKS — Read these from the card body text (large, clear font — not foil). These are the most reliable identifiers.
-- "Ability: [Name]" printed above the ability description box
-- Attack names printed in bold before each attack's cost and damage
-- HP number printed in the top-right corner of the card
+ABILITY & ATTACKS & HP — Read these PHYSICALLY from the card image. Do NOT use prior knowledge or memory — the card in the image may differ from other cards with the same Pokémon name.
+- HP: the number printed in the TOP-RIGHT corner next to the damage counter icon. Read it exactly — Mega Evolution cards in SV era may have HP 350–400, not 220–230.
+- Ability name: the word(s) printed in BOLD immediately after "Ability:" above the ability description box. Read what is physically printed — do not recall or guess.
+- Attack names: printed in bold at the start of each attack line. Read each name exactly as printed.
+- If text is unclear, return null for that field — never substitute with memorized data.
 
 Return ONLY valid JSON, no markdown, no extra text:
 {
