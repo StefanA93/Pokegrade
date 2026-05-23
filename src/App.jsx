@@ -896,8 +896,9 @@ function GradeResult({ result, game, frontImg, user, onSave }) {
             <div>AI set: <b style={{ color: '#fff' }}>{result.setName || '—'}</b></div>
             <div>AI finish: <b style={{ color: '#fff' }}>{result.finish || '—'}</b></div>
             <div>Catalog hit: <b style={{ color: result._debug.catalogHit ? COLORS.success : COLORS.danger }}>{result._debug.catalogHit ? 'YES ✓' : 'NO ✗'}</b></div>
-            <div>Source: <b style={{ color: '#fff' }}>{result._debug.source || 'catalog'}</b></div>
-            <div>Catalog ID: <b style={{ color: '#fff' }}>{result.catalogId || '—'}</b></div>
+            <div>Strategy: <b style={{ color: '#fff' }}>{result._debug.source || '—'}</b></div>
+            <div>Catalog ID: <b style={{ color: result._debug.catalogHit && !result.catalogId?.startsWith('neo') ? COLORS.success : '#fff' }}>{result.catalogId || '—'}</b></div>
+            {result._debug.error && <div style={{ color: COLORS.danger }}>Error: {result._debug.error}</div>}
           </div>
         )}
 

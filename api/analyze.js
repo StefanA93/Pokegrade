@@ -216,12 +216,13 @@ export default async function handler(req) {
           return r.ok ? await r.json() : []
         }
 
-        function applyHit(row) {
+        function applyHit(row, strategy) {
           catalogId = row.id
           officialImageUrl = row.image_url
           catalogPriceEur = row.price_eur
           catalogCardmarketUrl = row.cardmarket_url
           debugInfo.catalogHit = true
+          debugInfo.source = strategy || 'supabase'
         }
 
         const nums = numVariants(cardNumber)
@@ -260,23 +261,36 @@ export default async function handler(req) {
           try {
             let hit = null
 
-            // 0a: name + number + set total (most precise)
+            // 0a: name + number + set total — try all number variants (e.g. "023" and "23")
             if (nums.length && setTotal) {
-              hit = await tryPtcg(`name:"${cardName}" number:${nums[nums.length - 1]} set.total:${setTotal}`)
+              for (const num of nums) {
+                if (hit) break
+                hit = await tryPtcg(`name:"${cardName}" number:${num} set.total:${setTotal}`)
+              }
             }
-            // 0b: name + number only
+            // 0b: name + number — try all variants (leading-zero cards like "023" need exact match)
             if (!hit && nums.length) {
-              hit = await tryPtcg(`name:"${cardName}" number:${nums[nums.length - 1]}`)
+              for (const num of nums) {
+                if (hit) break
+                hit = await tryPtcg(`name:"${cardName}" number:${num}`)
+              }
             }
-            // 0c: name + rarity (when number unreadable) — prevents falling back to oldest card
+            // 0c: number + set name (skips name match — catches alternate name prints)
+            if (!hit && nums.length && setName) {
+              for (const num of nums) {
+                if (hit) break
+                hit = await tryPtcg(`number:${num} set.name:"${setName}"`)
+              }
+            }
+            // 0d: name + rarity (when number unreadable) — prevents falling back to oldest card
             if (!hit && rarityQuery) {
               hit = await tryPtcg(`name:"${cardName}" ${rarityQuery}`)
             }
-            // 0d: name + set name
+            // 0e: name + set name
             if (!hit && setName) {
               hit = await tryPtcg(`name:"${cardName}" set.name:"${setName}"`)
             }
-            // 0e: name only — newest card (avoids falling back to 1999-era cards)
+            // 0f: name only — newest card (avoids falling back to 1999-era cards)
             if (!hit) {
               hit = await tryPtcg(`name:"${cardName}"`)
             }
@@ -287,7 +301,7 @@ export default async function handler(req) {
               catalogPriceEur = hit.cardmarket?.prices?.averageSellPrice || null
               catalogCardmarketUrl = hit.cardmarket?.url || null
               debugInfo.catalogHit = true
-              debugInfo.source = 'pokemontcg.io'
+              debugInfo.source = 'ptcg'
             }
           } catch (_) {}
         }
@@ -300,7 +314,7 @@ export default async function handler(req) {
             const rows = await tryFetch(
               `${SUPABASE_URL}/rest/v1/card_catalog?${gameFilter}&${nameFilter}&number=eq.${encodeURIComponent(num)}&set_name=ilike.${safeSet}&select=${fields}&limit=1`
             )
-            if (rows[0]) applyHit(rows[0])
+            if (rows[0]) applyHit(rows[0], 's1')
           }
         }
 
@@ -311,9 +325,8 @@ export default async function handler(req) {
             const rows = await tryFetch(
               `${SUPABASE_URL}/rest/v1/card_catalog?${gameFilter}&${nameFilter}&number=eq.${encodeURIComponent(num)}&select=${fields}&order=updated_at.desc&limit=10`
             )
-            // Pick the row whose set matches the total (e.g. sv1 has 198 cards)
             const match = (rows || []).find(r => r.set_id && r.image_url)
-            if (match) applyHit(match)
+            if (match) applyHit(match, 's2')
           }
         }
 
@@ -326,7 +339,7 @@ export default async function handler(req) {
           const rows = await tryFetch(
             `${SUPABASE_URL}/rest/v1/card_catalog?${gameFilter}&${nameFilter}&set_name=ilike.${encodeURIComponent(`*${setName}*`)}${rarityFilter}&select=${fields}&limit=1`
           )
-          if (rows[0]) applyHit(rows[0])
+          if (rows[0]) applyHit(rows[0], 's3')
         }
 
         // Strategy 3b: name + set without rarity (looser)
@@ -334,7 +347,7 @@ export default async function handler(req) {
           const rows = await tryFetch(
             `${SUPABASE_URL}/rest/v1/card_catalog?${gameFilter}&${nameFilter}&set_name=ilike.${encodeURIComponent(`*${setName}*`)}&select=${fields}&limit=1`
           )
-          if (rows[0]) applyHit(rows[0])
+          if (rows[0]) applyHit(rows[0], 's3b')
         }
 
         // Strategy 4: name + rarity (most reliable fallback for SIR/IR/etc.)
@@ -342,15 +355,15 @@ export default async function handler(req) {
           const rows = await tryFetch(
             `${SUPABASE_URL}/rest/v1/card_catalog?${gameFilter}&${nameFilter}${rarityFilter}&select=${fields}&order=price_eur.desc.nullslast&limit=1`
           )
-          if (rows[0]) applyHit(rows[0])
+          if (rows[0]) applyHit(rows[0], 's4')
         }
 
-        // Strategy 5: name only — ordered by price desc as last resort
+        // Strategy 5: name only — newest set first (id desc sorts sv > swsh > neo > base alphabetically)
         if (!catalogId) {
           const rows = await tryFetch(
-            `${SUPABASE_URL}/rest/v1/card_catalog?${gameFilter}&${nameFilter}&select=${fields}&order=price_eur.desc.nullslast&limit=1`
+            `${SUPABASE_URL}/rest/v1/card_catalog?${gameFilter}&${nameFilter}&select=${fields}&order=id.desc&limit=1`
           )
-          if (rows[0]) applyHit(rows[0])
+          if (rows[0]) applyHit(rows[0], 's5')
         }
       }
     }
