@@ -453,12 +453,22 @@ export default async function handler(req) {
           if (rows[0]) applyHit(rows[0], 's4')
         }
 
-        // Strategy 5: name only — newest set first (id desc sorts sv > swsh > neo > base alphabetically)
-        if (!catalogId) {
+        // Strategy 5: name + rarity — correct finish, newest first
+        if (!catalogId && rarity) {
+          const rows = await tryFetch(
+            `${SUPABASE_URL}/rest/v1/card_catalog?${gameFilter}&${nameFilter}${rarityFilter}&select=${fields}&order=id.desc&limit=1`
+          )
+          if (rows[0]) applyHit(rows[0], 's5')
+        }
+
+        // Strategy 5b: name only — only for non-premium finishes (avoids returning wrong common/uncommon card)
+        const isPremiumFinish = parsedFinish &&
+          /Special Illustration|Illustration Rare|Hyper Rare|Secret Rare|Gold Secret|Full Art|Shiny Rare|Amazing Rare|Radiant Rare|Prism Star/i.test(parsedFinish)
+        if (!catalogId && !isPremiumFinish) {
           const rows = await tryFetch(
             `${SUPABASE_URL}/rest/v1/card_catalog?${gameFilter}&${nameFilter}&select=${fields}&order=id.desc&limit=1`
           )
-          if (rows[0]) applyHit(rows[0], 's5')
+          if (rows[0]) applyHit(rows[0], 's5b')
         }
       }
     }
