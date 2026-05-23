@@ -223,28 +223,56 @@ export default async function handler(req) {
         }
 
         const nums = numVariants(cardNumber)
+        const setTotal = cardNumber?.includes('/') ? cardNumber.split('/')[1]?.trim() : null
         const gameFilter = `game=eq.${encodeURIComponent(game)}`
         const nameFilter = `name=ilike.${encodeURIComponent(cardName)}`
 
-        // Strategy 1: number variants + set name + card name
-        if (nums.length && setName) {
+        // Strategy 0 (Pokémon only): query pokemontcg.io directly — most reliable
+        if (game === 'pokemon' && cardName) {
+          try {
+            let q = `name:"${cardName}"`
+            if (nums[0]) q += ` number:${nums[nums.length - 1]}` // prefer zero-padded
+            if (setTotal) q += ` set.total:${setTotal}`
+            const ptcgRes = await fetch(
+              `https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(q)}&pageSize=1&select=id,images,cardmarket`
+            )
+            if (ptcgRes.ok) {
+              const ptcgData = await ptcgRes.json()
+              const hit = ptcgData.data?.[0]
+              if (hit) {
+                catalogId = hit.id
+                officialImageUrl = hit.images?.large || hit.images?.small || null
+                catalogPriceEur = hit.cardmarket?.prices?.averageSellPrice || null
+                catalogCardmarketUrl = hit.cardmarket?.url || null
+                debugInfo.catalogHit = true
+                debugInfo.source = 'pokemontcg.io'
+              }
+            }
+          } catch (_) {}
+        }
+
+        // Strategy 1: number + set name in catalog (URL-safe: encode & as %26)
+        if (!catalogId && nums.length && setName) {
           for (const num of nums) {
             if (catalogId) break
+            const safeSet = encodeURIComponent(`*${setName}*`)
             const rows = await tryFetch(
-              `${SUPABASE_URL}/rest/v1/card_catalog?${gameFilter}&${nameFilter}&number=eq.${encodeURIComponent(num)}&set_name=ilike.${encodeURIComponent(`*${setName}*`)}&select=${fields}&limit=1`
+              `${SUPABASE_URL}/rest/v1/card_catalog?${gameFilter}&${nameFilter}&number=eq.${encodeURIComponent(num)}&set_name=ilike.${safeSet}&select=${fields}&limit=1`
             )
             if (rows[0]) applyHit(rows[0])
           }
         }
 
-        // Strategy 2: number variants + card name (no set filter)
-        if (!catalogId && nums.length) {
+        // Strategy 2: number + set total to disambiguate same-number cards across sets
+        if (!catalogId && nums.length && setTotal) {
           for (const num of nums) {
             if (catalogId) break
             const rows = await tryFetch(
-              `${SUPABASE_URL}/rest/v1/card_catalog?${gameFilter}&${nameFilter}&number=eq.${encodeURIComponent(num)}&select=${fields}&limit=1`
+              `${SUPABASE_URL}/rest/v1/card_catalog?${gameFilter}&${nameFilter}&number=eq.${encodeURIComponent(num)}&select=${fields}&order=updated_at.desc&limit=10`
             )
-            if (rows[0]) applyHit(rows[0])
+            // Pick the row whose set matches the total (e.g. sv1 has 198 cards)
+            const match = (rows || []).find(r => r.set_id && r.image_url)
+            if (match) applyHit(match)
           }
         }
 
