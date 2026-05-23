@@ -227,26 +227,61 @@ export default async function handler(req) {
         const gameFilter = `game=eq.${encodeURIComponent(game)}`
         const nameFilter = `name=ilike.${encodeURIComponent(cardName)}`
 
+        // Map AI finish → pokemontcg.io rarity query term
+        const finishRarityQuery = {
+          'Special Illustration Rare': 'rarity:"Special Illustration Rare"',
+          'Illustration Rare':         'rarity:"Illustration Rare"',
+          'Hyper Rare':                'rarity:"Rare Rainbow"',
+          'Secret Rare':               'rarity:"Rare Secret"',
+          'Gold Secret Rare':          'rarity:"Rare Secret"',
+          'Full Art':                  'rarity:"Rare Ultra"',
+          'Holo Rare':                 'rarity:"Rare Holo"',
+          'Shiny Rare':                'rarity:"Shiny Rare"',
+          'Amazing Rare':              'rarity:"Amazing Rare"',
+          'Radiant Rare':              'rarity:"Radiant Rare"',
+          'Prism Star':                'rarity:"Rare Prism"',
+          'Normal':                    'rarity:"Common"',
+          'Reverse Holo':              'rarity:"Common" OR rarity:"Uncommon" OR rarity:"Rare"',
+        }
+        const parsedFinish = parsedJson.finish || null
+        const rarityQuery = finishRarityQuery[parsedFinish] || null
+
         // Strategy 0 (Pokémon only): query pokemontcg.io directly — most reliable
         if (game === 'pokemon' && cardName) {
+          const tryPtcg = async (q) => {
+            const r = await fetch(`https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(q)}&pageSize=1&select=id,images,cardmarket`)
+            if (!r.ok) return null
+            const d = await r.json()
+            return d.data?.[0] || null
+          }
+
           try {
-            let q = `name:"${cardName}"`
-            if (nums[0]) q += ` number:${nums[nums.length - 1]}` // prefer zero-padded
-            if (setTotal) q += ` set.total:${setTotal}`
-            const ptcgRes = await fetch(
-              `https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(q)}&pageSize=1&select=id,images,cardmarket`
-            )
-            if (ptcgRes.ok) {
-              const ptcgData = await ptcgRes.json()
-              const hit = ptcgData.data?.[0]
-              if (hit) {
-                catalogId = hit.id
-                officialImageUrl = hit.images?.large || hit.images?.small || null
-                catalogPriceEur = hit.cardmarket?.prices?.averageSellPrice || null
-                catalogCardmarketUrl = hit.cardmarket?.url || null
-                debugInfo.catalogHit = true
-                debugInfo.source = 'pokemontcg.io'
-              }
+            let hit = null
+
+            // 0a: name + number + set total (most precise)
+            if (nums.length && setTotal) {
+              hit = await tryPtcg(`name:"${cardName}" number:${nums[nums.length - 1]} set.total:${setTotal}`)
+            }
+            // 0b: name + number only
+            if (!hit && nums.length) {
+              hit = await tryPtcg(`name:"${cardName}" number:${nums[nums.length - 1]}`)
+            }
+            // 0c: name + rarity (when number unreadable) — prevents falling back to oldest card
+            if (!hit && rarityQuery) {
+              hit = await tryPtcg(`name:"${cardName}" ${rarityQuery}`)
+            }
+            // 0d: name + set name
+            if (!hit && setName) {
+              hit = await tryPtcg(`name:"${cardName}" set.name:"${setName}"`)
+            }
+
+            if (hit) {
+              catalogId = hit.id
+              officialImageUrl = hit.images?.large || hit.images?.small || null
+              catalogPriceEur = hit.cardmarket?.prices?.averageSellPrice || null
+              catalogCardmarketUrl = hit.cardmarket?.url || null
+              debugInfo.catalogHit = true
+              debugInfo.source = 'pokemontcg.io'
             }
           } catch (_) {}
         }
@@ -365,16 +400,23 @@ function buildPrompt(game, hasBack) {
 
   return `You are an expert ${gameName} card identifier. Analyze ${hasBack ? 'these two images (front and back)' : 'this card image'} and identify the card with maximum precision.
 
-CARD NUMBER — THIS IS CRITICAL:
-Look at the very bottom of the card for a number like "045/165" or "215/197" or "SV001". Special Illustration Rares and Secret Rares have numbers ABOVE the set total (e.g. "215/197"). Read this number exactly as printed — do not guess.
+CARD NUMBER — CRITICAL: Look at the very bottom corner for a number like "045/165" or "215/197". Secret/Special Rares have numbers ABOVE set total (e.g. "215/197"). Read exactly as printed.
+
+FINISH — identify from visual appearance:
+- Full painted illustration covering the entire card face = Special Illustration Rare or Illustration Rare
+- Art extends to card edges with rainbow/gold border = Hyper Rare or Full Art
+- Regular frame with shiny holofoil pattern in artwork area = Holo Rare
+- Regular frame with shiny foil on non-art areas only = Reverse Holo
+- Regular frame, no foil at all = Normal
+- Number higher than set total = Secret Rare or higher rarity
 
 The card is assumed Near Mint — estimate market value at NM prices.
 
 Return ONLY valid JSON, no markdown, no extra text:
 {
   "cardName": "<name exactly as printed on card>",
-  "cardNumber": "<number at bottom of card e.g. 045/165 — null only if completely unreadable>",
-  "setName": "<set name from copyright line or set symbol e.g. Paldean Fates, Obsidian Flames>",
+  "cardNumber": "<number at bottom e.g. 045/165 — null only if truly unreadable>",
+  "setName": "<set name from copyright line e.g. Paldean Fates, Obsidian Flames, Scarlet & Violet>",
   "finish": "<one of: Normal | Holo Rare | Reverse Holo | Full Art | Secret Rare | Hyper Rare | Special Illustration Rare | Illustration Rare | Gold Secret Rare | Amazing Rare | Shiny Rare | Radiant Rare | Prism Star | 1st Edition | Shadowless | Promo | null>",
   "confidence": "<High|Mid|Low>",
   "centering": "<centering description>",
