@@ -273,6 +273,8 @@ export default async function handler(req) {
         const setTotal = cardNumber?.includes('/') ? cardNumber.split('/')[1]?.trim() : null
         const gameFilter = `game=eq.${encodeURIComponent(game)}`
         const nameFilter = `name=ilike.${encodeURIComponent(cardName)}`
+        // Exclude Japanese-only set IDs (rsv* = Japanese SV reprints) from Supabase lookups
+        const langFilter = game === 'pokemon' ? '&set_id=not.like.rsv*' : ''
 
         // Map AI finish → pokemontcg.io rarity query term
         const finishRarityQuery = {
@@ -504,7 +506,7 @@ export default async function handler(req) {
             if (catalogId) break
             const safeSet = encodeURIComponent(`*${setName}*`)
             const rows = await tryFetch(
-              `${SUPABASE_URL}/rest/v1/card_catalog?${gameFilter}&${nameFilter}&number=eq.${encodeURIComponent(num)}&set_name=ilike.${safeSet}&select=${fields}&limit=1`
+              `${SUPABASE_URL}/rest/v1/card_catalog?${gameFilter}&${nameFilter}&number=eq.${encodeURIComponent(num)}&set_name=ilike.${safeSet}${langFilter}&select=${fields}&limit=1`
             )
             if (rows[0]) applyHit(rows[0], 's1')
           }
@@ -515,7 +517,7 @@ export default async function handler(req) {
           for (const num of nums) {
             if (catalogId) break
             const rows = await tryFetch(
-              `${SUPABASE_URL}/rest/v1/card_catalog?${gameFilter}&${nameFilter}&number=eq.${encodeURIComponent(num)}&select=${fields}&order=updated_at.desc&limit=10`
+              `${SUPABASE_URL}/rest/v1/card_catalog?${gameFilter}&${nameFilter}&number=eq.${encodeURIComponent(num)}${langFilter}&select=${fields}&order=updated_at.desc&limit=10`
             )
             const match = (rows || []).find(r => r.set_id && r.image_url)
             if (match) applyHit(match, 's2')
@@ -529,7 +531,7 @@ export default async function handler(req) {
         // Strategy 3: name + set + rarity
         if (!catalogId && setName) {
           const rows = await tryFetch(
-            `${SUPABASE_URL}/rest/v1/card_catalog?${gameFilter}&${nameFilter}&set_name=ilike.${encodeURIComponent(`*${setName}*`)}${rarityFilter}&select=${fields}&limit=1`
+            `${SUPABASE_URL}/rest/v1/card_catalog?${gameFilter}&${nameFilter}&set_name=ilike.${encodeURIComponent(`*${setName}*`)}${rarityFilter}${langFilter}&select=${fields}&limit=1`
           )
           if (rows[0]) applyHit(rows[0], 's3')
         }
@@ -537,7 +539,7 @@ export default async function handler(req) {
         // Strategy 3b: name + set without rarity (looser)
         if (!catalogId && setName) {
           const rows = await tryFetch(
-            `${SUPABASE_URL}/rest/v1/card_catalog?${gameFilter}&${nameFilter}&set_name=ilike.${encodeURIComponent(`*${setName}*`)}&select=${fields}&limit=1`
+            `${SUPABASE_URL}/rest/v1/card_catalog?${gameFilter}&${nameFilter}&set_name=ilike.${encodeURIComponent(`*${setName}*`)}${langFilter}&select=${fields}&limit=1`
           )
           if (rows[0]) applyHit(rows[0], 's3b')
         }
@@ -545,7 +547,7 @@ export default async function handler(req) {
         // Strategy 4: name + rarity (most reliable fallback for SIR/IR/etc.)
         if (!catalogId && rarity) {
           const rows = await tryFetch(
-            `${SUPABASE_URL}/rest/v1/card_catalog?${gameFilter}&${nameFilter}${rarityFilter}&select=${fields}&order=price_eur.desc.nullslast&limit=1`
+            `${SUPABASE_URL}/rest/v1/card_catalog?${gameFilter}&${nameFilter}${rarityFilter}${langFilter}&select=${fields}&order=price_eur.desc.nullslast&limit=1`
           )
           if (rows[0]) applyHit(rows[0], 's4')
         }
@@ -553,7 +555,7 @@ export default async function handler(req) {
         // Strategy 5: name + rarity — correct finish, newest first
         if (!catalogId && rarity) {
           const rows = await tryFetch(
-            `${SUPABASE_URL}/rest/v1/card_catalog?${gameFilter}&${nameFilter}${rarityFilter}&select=${fields}&order=id.desc&limit=1`
+            `${SUPABASE_URL}/rest/v1/card_catalog?${gameFilter}&${nameFilter}${rarityFilter}${langFilter}&select=${fields}&order=id.desc&limit=1`
           )
           if (rows[0]) applyHit(rows[0], 's5')
         }
@@ -563,7 +565,7 @@ export default async function handler(req) {
           /Special Illustration|Illustration Rare|Hyper Rare|Secret Rare|Gold Secret|Full Art|Shiny Rare|Amazing Rare|Radiant Rare|Prism Star/i.test(parsedFinish)
         if (!catalogId && !isPremiumFinish) {
           const rows = await tryFetch(
-            `${SUPABASE_URL}/rest/v1/card_catalog?${gameFilter}&${nameFilter}&select=${fields}&order=id.desc&limit=1`
+            `${SUPABASE_URL}/rest/v1/card_catalog?${gameFilter}&${nameFilter}${langFilter}&select=${fields}&order=id.desc&limit=1`
           )
           if (rows[0]) applyHit(rows[0], 's5b')
         }
