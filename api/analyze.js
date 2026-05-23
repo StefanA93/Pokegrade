@@ -175,7 +175,11 @@ export default async function handler(req) {
     if (start !== -1 && end !== -1) {
       const parsed = JSON.parse(raw.slice(start, end + 1))
       const cardName = parsed.cardName || null
-      const cardNumber = parsed.cardNumber || null
+      // Normalize denominators where AI folds a series prefix into the number
+      // e.g. "100/XY123" → "100/123", "45/SV200" → "45/200"
+      const cardNumber = parsed.cardNumber
+        ? parsed.cardNumber.replace(/^(\d+)\/(XY|SV|SWSH|SM|BW|DP|HGSS)(\d+)$/i, '$1/$3')
+        : null
       const setName = parsed.setName || null
       const ability = parsed.ability || null
       const attacks = Array.isArray(parsed.attacks) ? parsed.attacks.filter(Boolean) : []
@@ -185,6 +189,7 @@ export default async function handler(req) {
       debugInfo.ability = ability
       debugInfo.hp = hp
       debugInfo.setEra = setEra
+      if (cardNumber && cardNumber !== parsed.cardNumber) debugInfo.numNorm = `${parsed.cardNumber}→${cardNumber}`
 
       // Number-based finish override
       let parsedFinishOverride = null
@@ -822,10 +827,11 @@ function buildIdentifyPrompt(game, hasBack) {
   return `You are an expert ${gameName} card identifier. Analyze ${hasBack ? 'these two images (front and back)' : 'this card image'} and identify the card with maximum precision.
 
 CARD NUMBER — CRITICAL: The second image is an enlarged crop of the bottom of the card.
-- Standard set cards: number is ALWAYS in "X/Y" format where BOTH X and Y are numbers (e.g. "045/165", "215/197", "100/108")
-- The set series name (XY, SV, SWSH) may appear AFTER the number on the same line — e.g. "100/108 XY EVOLUTIONS". The series label is NOT part of the number. Return only "100/108", not "100/XY".
-- Promo cards: number is NEVER in X/Y format — it is a standalone code (e.g. "SVP EN 113", "SWSH052", "SM229")
-- If you see a promo code without "/" → return it exactly as-is and set finish = Promo
+- Standard set cards: number is ALWAYS in "X/Y" format where BOTH X and Y are PURE DIGITS (e.g. "045/165", "215/197", "100/123")
+- The set series abbreviation (XY, SV, SWSH, SM, BW) may appear immediately after the number with NO space — e.g. "100/123XY MEGA EVOLUTION" or "100/108 XY EVOLUTIONS". These abbreviations are set branding, NOT part of the number.
+- CRITICAL: If the denominator starts with a series abbreviation (XY, SV, SWSH, SM, BW) followed by digits — e.g. you think the number is "100/XY123" — you are wrong. The denominator is ONLY the digits: return "100/123", not "100/XY123".
+- The denominator is ALWAYS a plain number. It never contains letters. If you see letters in the denominator, strip them.
+- Promo cards: standalone code without "/" (e.g. "SVP EN 113", "SWSH052", "XY123") → return exactly as-is and set finish = Promo
 - Return null ONLY if completely unreadable
 
 SET NAME — CRITICAL: Read the SPECIFIC set name from the small text at the very bottom of the card.
