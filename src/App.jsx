@@ -801,13 +801,13 @@ function ScanScreen({ user, profile, onScanDone, modelState, modelProgress }) {
           return (
             <button key={g.id} onClick={() => setGame(g.id)} style={{
               flexShrink: 0,
-              padding: '10px 12px 9px',
+              padding: '8px 10px',
               borderRadius: 14,
               background: active ? g.color + '18' : COLORS.card,
               border: `1.5px solid ${active ? g.color : COLORS.border}`,
               color: active ? g.color : COLORS.muted,
-              display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
-              minWidth: 66,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              minWidth: 58,
               boxShadow: active ? `0 0 14px ${g.color}28` : 'none',
               transition: 'all .15s',
             }}>
@@ -831,9 +831,6 @@ function ScanScreen({ user, profile, onScanDone, modelState, modelProgress }) {
                   </div>
                 )}
               </div>
-              <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.2, whiteSpace: 'nowrap' }}>
-                {g.label}
-              </span>
             </button>
           )
         })}
