@@ -468,6 +468,7 @@ function CameraModal({ onCapture, onClose }) {
   const [err, setErr] = useState('')
 
   useEffect(() => {
+    let cancelled = false
     async function start() {
       try {
         let stream
@@ -476,16 +477,26 @@ function CameraModal({ onCapture, onClose }) {
         } catch {
           stream = await navigator.mediaDevices.getUserMedia({ video: true })
         }
+        if (cancelled) { stream.getTracks().forEach(t => t.stop()); return }
         streamRef.current = stream
-        videoRef.current.srcObject = stream
-        videoRef.current.play()
-        setReady(true)
+        const video = videoRef.current
+        video.srcObject = stream
+        // Wait until the video has enough data to actually show a frame
+        await new Promise(resolve => {
+          if (video.readyState >= 2) return resolve()
+          video.addEventListener('canplay', resolve, { once: true })
+        })
+        await video.play()
+        if (!cancelled) setReady(true)
       } catch {
-        setErr('Could not access camera. Allow camera permission in your browser.')
+        if (!cancelled) setErr('Could not access camera. Allow camera permission in your browser.')
       }
     }
     start()
-    return () => streamRef.current?.getTracks().forEach(t => t.stop())
+    return () => {
+      cancelled = true
+      streamRef.current?.getTracks().forEach(t => t.stop())
+    }
   }, [])
 
   function capture() {
