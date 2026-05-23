@@ -3,6 +3,7 @@ export const config = { runtime: 'edge' }
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY
 const SUPABASE_URL = process.env.SUPABASE_URL
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY
+const PTCG_API_KEY = process.env.PTCG_API_KEY
 
 export default async function handler(req) {
   if (req.method === 'OPTIONS') {
@@ -249,61 +250,95 @@ export default async function handler(req) {
         const parsedFinish = parsed.finish || null
         const rarityQuery = finishRarityQuery[parsedFinish] || null
 
-        // Strategy 0 (Pokémon only): query pokemontcg.io directly — most reliable
+        // Strategy 0 (Pokémon only): pokemontcg.io live lookup with multi-result best-pick
         if (game === 'pokemon' && cardName) {
-          const tryPtcg = async (q, orderBy = '-set.releaseDate') => {
-            const r = await fetch(`https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(q)}&orderBy=${orderBy}&pageSize=1&select=id,images,cardmarket,set`)
-            if (!r.ok) return null
-            const d = await r.json()
-            return d.data?.[0] || null
+          const ptcgHeaders = PTCG_API_KEY ? { 'X-Api-Key': PTCG_API_KEY } : {}
+
+          // Generic series names that do NOT correspond to specific sets
+          const SERIES_NAMES = new Set([
+            'Scarlet & Violet', 'Sword & Shield', 'Sun & Moon', 'XY',
+            'Black & White', 'HeartGold SoulSilver', 'Diamond & Pearl',
+            'EX Series', 'EX', 'Neo', 'Base Set Series'
+          ])
+          // Map series → most common base set ID as a useful fallback
+          const SERIES_TO_BASE = {
+            'Scarlet & Violet': 'sv1', 'Sword & Shield': 'swsh1',
+            'Sun & Moon': 'sm1', 'XY': 'xy1', 'Black & White': 'bw1',
+            'HeartGold SoulSilver': 'hgss1', 'Diamond & Pearl': 'dp1',
           }
 
+          const queryPtcg = async (q, size = 10) => {
+            const url = `https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(q)}&orderBy=-set.releaseDate&pageSize=${size}&select=id,images,cardmarket,set,rarity,number`
+            const r = await fetch(url, { headers: ptcgHeaders })
+            if (!r.ok) { debugInfo.ptcgStatus = r.status; return [] }
+            const d = await r.json()
+            return d.data || []
+          }
+
+          // Pick best card from a list of candidates
+          const pickBest = (cards, targetRarityStr, targetNums) => {
+            if (!cards.length) return null
+            // 1. Number + rarity exact match
+            if (targetNums?.length && targetRarityStr) {
+              for (const num of targetNums) {
+                const m = cards.find(c => c.number === num && c.rarity?.toLowerCase().includes(targetRarityStr.toLowerCase().split(' ')[0]))
+                if (m) return m
+              }
+            }
+            // 2. Exact number match (any rarity)
+            if (targetNums?.length) {
+              for (const num of targetNums) {
+                const m = cards.find(c => c.number === num)
+                if (m) return m
+              }
+            }
+            // 3. Rarity match — pick newest (first in list since ordered by -releaseDate)
+            if (targetRarityStr) {
+              const keyword = targetRarityStr.toLowerCase().split(' ')[0] // "special", "illustration", "holo", etc.
+              const m = cards.find(c => c.rarity?.toLowerCase().includes(keyword))
+              if (m) return m
+            }
+            // 4. Newest card (first result)
+            return cards[0]
+          }
+
+          const ptcgRarityStr = parsedFinish ? finishToRarity(parsedFinish) : null
+
           try {
-            let hit = null
+            let candidates = []
 
-            // 0a: name + number + set total — try all number variants (e.g. "023" and "23")
-            if (nums.length && setTotal) {
-              for (const num of nums) {
-                if (hit) break
-                hit = await tryPtcg(`name:"${cardName}" number:${num} set.total:${setTotal}`)
-              }
-            }
-            // 0b: name + number — try all variants (leading-zero cards like "023" need exact match)
-            if (!hit && nums.length) {
-              for (const num of nums) {
-                if (hit) break
-                hit = await tryPtcg(`name:"${cardName}" number:${num}`)
-              }
-            }
-            // 0c: number + set name (skips name match — catches alternate name prints)
-            if (!hit && nums.length && setName) {
-              for (const num of nums) {
-                if (hit) break
-                hit = await tryPtcg(`number:${num} set.name:"${setName}"`)
-              }
-            }
-            // 0d: name + rarity (when number unreadable) — most reliable for SIR/IR/Hyper
-            if (!hit && rarityQuery) {
-              hit = await tryPtcg(`name:"${cardName}" ${rarityQuery}`)
-            }
-            // 0e: name + set name (exact)
-            if (!hit && setName) {
-              hit = await tryPtcg(`name:"${cardName}" set.name:"${setName}"`)
-            }
-            // 0f: name only (exact) — newest first
-            if (!hit) {
-              hit = await tryPtcg(`name:"${cardName}"`)
-            }
-            // 0g: name partial match (no quotes) — catches alternate prints, ex/V suffixes
-            if (!hit) {
-              hit = await tryPtcg(`name:${encodeURIComponent(cardName).replace(/%22/g, '')}`)
+            // Pass 1: name + specific set name (only if not a generic series name)
+            if (setName && !SERIES_NAMES.has(setName)) {
+              candidates = await queryPtcg(`name:"${cardName}" set.name:"${setName}"`)
+              debugInfo.ptcgQ = `name+set`
             }
 
-            if (hit) {
-              catalogId = hit.id
-              officialImageUrl = hit.images?.large || hit.images?.small || null
-              catalogPriceEur = hit.cardmarket?.prices?.averageSellPrice || null
-              catalogCardmarketUrl = hit.cardmarket?.url || null
+            // Pass 2: name + set ID mapped from series name (e.g. "Scarlet & Violet" → sv1)
+            if (!candidates.length && setName && SERIES_TO_BASE[setName]) {
+              candidates = await queryPtcg(`name:"${cardName}" set.id:${SERIES_TO_BASE[setName]}`)
+              debugInfo.ptcgQ = `name+setId`
+            }
+
+            // Pass 3: name only — get top 10 newest, then pick by rarity/number
+            if (!candidates.length) {
+              candidates = await queryPtcg(`name:"${cardName}"`)
+              debugInfo.ptcgQ = `name-only`
+            }
+
+            // Pass 4: partial name (no quotes) — catches "Gothitelle ex", name-only promos
+            if (!candidates.length) {
+              candidates = await queryPtcg(`name:${cardName.replace(/["\s]/g, '*')}`)
+              debugInfo.ptcgQ = `name-partial`
+            }
+
+            debugInfo.ptcgCount = candidates.length
+
+            const best = pickBest(candidates, ptcgRarityStr, nums.length ? nums : null)
+            if (best) {
+              catalogId = best.id
+              officialImageUrl = best.images?.large || best.images?.small || null
+              catalogPriceEur = best.cardmarket?.prices?.averageSellPrice || null
+              catalogCardmarketUrl = best.cardmarket?.url || null
               debugInfo.catalogHit = true
               debugInfo.source = 'ptcg'
             }

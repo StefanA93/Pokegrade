@@ -892,14 +892,14 @@ function GradeResult({ result, game, frontImg, user, onSave }) {
           <div style={{ background: '#111', border: '1px solid #333', borderRadius: 10, padding: 10, marginBottom: 10, fontSize: 10, color: '#aaa', fontFamily: 'monospace', lineHeight: 1.6 }}>
             <div style={{ color: COLORS.gold, fontWeight: 700, marginBottom: 4 }}>🔍 Catalog Debug</div>
             <div>AI name: <b style={{ color: '#fff' }}>{result.cardName || '—'}</b></div>
-            <div>AI number: <b style={{ color: '#fff' }}>{result.cardNumber || '—'}</b></div>
+            <div>AI number: <b style={{ color: result.cardNumber ? COLORS.success : COLORS.danger }}>{result.cardNumber || 'null'}</b></div>
             <div>AI set: <b style={{ color: '#fff' }}>{result.setName || '—'}</b></div>
-            <div>AI finish: <b style={{ color: '#fff' }}>{result.finish || '—'}</b></div>
-            <div>Catalog hit: <b style={{ color: result._debug.catalogHit ? COLORS.success : COLORS.danger }}>{result._debug.catalogHit ? 'YES ✓' : 'NO ✗'}</b></div>
-            <div>Strategy: <b style={{ color: '#fff' }}>{result._debug.source || '—'}</b></div>
-            <div>Catalog ID: <b style={{ color: result._debug.catalogHit && !result.catalogId?.startsWith('neo') ? COLORS.success : '#fff' }}>{result.catalogId || '—'}</b></div>
-            {result._debug.error && <div style={{ color: COLORS.danger }}>Err: {result._debug.error}</div>}
-            {result._debug.ptcgError && <div style={{ color: '#e67e22' }}>ptcg err: {result._debug.ptcgError}</div>}
+            <div>AI finish: <b style={{ color: result.finish ? COLORS.success : COLORS.danger }}>{result.finish || 'null'}</b></div>
+            <div>ptcg: <b style={{ color: '#fff' }}>{result._debug.ptcgQ || '—'}</b> · <b style={{ color: result._debug.ptcgCount > 0 ? COLORS.success : COLORS.danger }}>{result._debug.ptcgCount ?? '?'} hits</b></div>
+            <div>Strategy: <b style={{ color: '#fff' }}>{result._debug.source || '—'}</b> · Catalog ID: <b style={{ color: '#fff' }}>{result.catalogId || '—'}</b></div>
+            {result._debug.ptcgStatus && <div style={{ color: '#e67e22' }}>ptcg HTTP {result._debug.ptcgStatus}</div>}
+            {result._debug.ptcgError && <div style={{ color: COLORS.danger }}>ptcg err: {result._debug.ptcgError}</div>}
+            {result._debug.error && <div style={{ color: COLORS.danger }}>err: {result._debug.error}</div>}
           </div>
         )}
 
