@@ -822,7 +822,6 @@ function ScanScreen({ user, profile, onScanDone, modelState, modelProgress }) {
                       objectFit: 'contain',
                       opacity: active ? 1 : 0.45,
                       filter: active ? 'none' : 'grayscale(30%)',
-                      mixBlendMode: g.id === 'onepiece' ? 'screen' : 'normal',
                       transition: 'opacity .15s, filter .15s',
                     }}
                   />
@@ -2135,7 +2134,6 @@ function SearchScreen({ onSelectGame }) {
                         maxWidth: game.id === 'dragonball' ? '96%' : '88%',
                         maxHeight: game.id === 'dragonball' ? 62 : 54,
                         width: 'auto', height: 'auto', objectFit: 'contain',
-                        mixBlendMode: game.id === 'onepiece' ? 'screen' : 'normal',
                       }}
                     />
                   ) : (
