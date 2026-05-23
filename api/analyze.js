@@ -275,14 +275,13 @@ export default async function handler(req) {
     body: JSON.stringify({ total_scans: (profile.total_scans || 0) + 1 })
   })
 
-  const isDev = process.env.VERCEL_ENV === 'development'
   return new Response(JSON.stringify({
     analysis: analysisText,
     officialImageUrl,
     catalogId: catalogId || null,
     catalogPriceEur: catalogPriceEur || null,
     catalogCardmarketUrl: catalogCardmarketUrl || null,
-    ...(isDev ? { debugInfo } : {}),
+    debugInfo,
   }), {
     headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
   })

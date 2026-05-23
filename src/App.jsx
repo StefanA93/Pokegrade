@@ -605,6 +605,7 @@ function ScanScreen({ user, profile, onScanDone }) {
         catalogId: data.catalogId || null,
         catalogPriceEur: data.catalogPriceEur || null,
         catalogCardmarketUrl: data.catalogCardmarketUrl || null,
+        _debug: data.debugInfo || null,
       })
       onScanDone()
     } catch (err) {
@@ -864,6 +865,18 @@ function GradeResult({ result, game, frontImg, user, onSave }) {
           </div>
           <div style={{ fontSize: 13, color: COLORS.muted, lineHeight: 1.5 }}>{result.recommendation}</div>
         </div>
+
+        {/* Debug info — temporary */}
+        {result._debug && (
+          <div style={{ background: '#111', border: '1px solid #333', borderRadius: 10, padding: 10, marginBottom: 10, fontSize: 10, color: '#aaa', fontFamily: 'monospace', lineHeight: 1.6 }}>
+            <div style={{ color: COLORS.gold, fontWeight: 700, marginBottom: 4 }}>🔍 Catalog Debug</div>
+            <div>AI name: <b style={{ color: '#fff' }}>{result.cardName || '—'}</b></div>
+            <div>AI number: <b style={{ color: '#fff' }}>{result.cardNumber || '—'}</b></div>
+            <div>AI set: <b style={{ color: '#fff' }}>{result.setName || '—'}</b></div>
+            <div>Catalog hit: <b style={{ color: result._debug.catalogHit ? COLORS.success : COLORS.danger }}>{result._debug.catalogHit ? 'YES ✓' : 'NO ✗'}</b></div>
+            <div>Catalog ID: <b style={{ color: '#fff' }}>{result.catalogId || '—'}</b></div>
+          </div>
+        )}
 
         {/* Handlingsknapper */}
         {saveError && <p style={{ color: COLORS.danger, fontSize: 12, textAlign: 'center', marginBottom: 4 }}>{saveError}</p>}
