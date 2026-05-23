@@ -608,28 +608,60 @@ function ScanScreen({ user, profile, onScanDone }) {
       const { data: { session } } = await supabase.auth.getSession()
       const token = session?.access_token
       if (!token) { setError('Not signed in — please reload the app'); setLoading(false); return }
-      const numberImage = await cropCardNumberArea(frontImg)
+
+      const authHeaders = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }
+      let matchedCard = null
+
+      // Step 1: Embedding-based visual match (if model is loaded)
+      try {
+        const { isModelLoaded, extractEmbeddingFromDataUrl } = await import('./recognition/EmbeddingExtractor.js')
+        if (isModelLoaded()) {
+          const embedding = await extractEmbeddingFromDataUrl(frontImg)
+          const matchRes = await fetch('/api/match', {
+            method: 'POST',
+            headers: authHeaders,
+            body: JSON.stringify({ embedding, game }),
+          })
+          if (matchRes.ok) {
+            const matchData = await matchRes.json()
+            if (!matchData.fallback && matchData.confidence === 'high' && matchData.match) {
+              matchedCard = matchData.match
+            }
+          }
+        }
+      } catch (_embErr) {
+        // Embedding not available — fall through to Claude identification
+      }
+
+      // Step 2: Claude analysis — grading only if card identified, full analysis otherwise
+      const numberImage = matchedCard ? null : await cropCardNumberArea(frontImg)
+      const analyzeBody = { frontImage: frontImg, backImage: backImg, game }
+      if (!matchedCard) analyzeBody.numberImage = numberImage
+      if (matchedCard) analyzeBody.matchedCard = matchedCard
+
       const res = await fetch('/api/analyze', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ frontImage: frontImg, backImage: backImg, numberImage, game })
+        headers: authHeaders,
+        body: JSON.stringify(analyzeBody),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Analysis failed')
+
       const raw = data.analysis
       const start = raw.indexOf('{')
       const end = raw.lastIndexOf('}')
       const parsed = JSON.parse(raw.slice(start, end + 1))
+
       setResult({
         ...parsed,
-        officialImageUrl: data.officialImageUrl || null,
-        catalogId: data.catalogId || null,
-        catalogPriceEur: data.catalogPriceEur || null,
-        catalogCardmarketUrl: data.catalogCardmarketUrl || null,
-        verifiedRarity: data.verifiedRarity || null,
-        verifiedSetName: data.verifiedSetName || null,
-        verifiedNumber: data.verifiedNumber || null,
-        _debug: data.debugInfo || null,
+        officialImageUrl: data.officialImageUrl || matchedCard?.image_url || null,
+        catalogId: data.catalogId || matchedCard?.id || null,
+        catalogPriceEur: data.catalogPriceEur ?? matchedCard?.price_eur ?? null,
+        catalogCardmarketUrl: data.catalogCardmarketUrl || matchedCard?.cardmarket_url || null,
+        verifiedRarity: data.verifiedRarity || matchedCard?.rarity || null,
+        verifiedSetName: data.verifiedSetName || matchedCard?.set_name || null,
+        verifiedNumber: data.verifiedNumber || matchedCard?.number || null,
+        _debug: { ...data.debugInfo, embeddingMatch: !!matchedCard, matchScore: matchedCard?.score },
       })
       onScanDone()
     } catch (err) {

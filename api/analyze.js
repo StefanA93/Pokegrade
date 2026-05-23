@@ -90,7 +90,9 @@ export default async function handler(req) {
 
   const VALID_GAMES = ['pokemon', 'mtg', 'yugioh', 'onepiece', 'dragonball', 'lorcana']
   const game = VALID_GAMES.includes(body.game) ? body.game : 'pokemon'
-  const { frontImage, backImage, numberImage } = body
+  const { frontImage, backImage, numberImage, matchedCard } = body
+  // matchedCard: pre-identified card from api/match.js (embedding search)
+  // When provided, Claude only grades condition — no identification needed
 
   const MAX_IMAGE_BYTES = 5 * 1024 * 1024
   function isValidImage(dataUrl) {
@@ -106,12 +108,16 @@ export default async function handler(req) {
     return new Response(JSON.stringify({ error: 'Back image invalid (max 5 MB)' }), { status: 400 })
   }
 
-  const prompt = buildPrompt(game, !!backImage)
+  const useGradingOnly = !!(matchedCard?.id)
+  const prompt = useGradingOnly
+    ? buildGradingPrompt(game, matchedCard)
+    : buildIdentifyPrompt(game, !!backImage)
+
   const messageContent = [
     { type: 'text', text: prompt },
     { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: frontImage.replace(/^data:image\/\w+;base64,/, '') } },
   ]
-  if (numberImage && isValidImage(numberImage)) {
+  if (!useGradingOnly && numberImage && isValidImage(numberImage)) {
     messageContent.push({ type: 'text', text: 'ENLARGED card number area (bottom of card) — read the card number from this zoomed image:' })
     messageContent.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: numberImage.replace(/^data:image\/\w+;base64,/, '') } })
   }
@@ -148,17 +154,21 @@ export default async function handler(req) {
   const aiData = await anthropicRes.json()
   const analysisText = aiData.content?.[0]?.text || ''
 
-  // Catalog lookup — fetch official image + price from card_catalog
-  let officialImageUrl = null
-  let catalogId = null
-  let catalogPriceEur = null
-  let catalogCardmarketUrl = null
-  let verifiedRarity = null
-  let verifiedSetName = null
-  let verifiedNumber = null
-  let debugInfo = { cardName: null, catalogHit: false }
+  // Catalog data — either from pre-matched card (embedding search) or lookup below
+  let officialImageUrl = matchedCard?.image_url || null
+  let catalogId = matchedCard?.id || null
+  let catalogPriceEur = matchedCard?.price_eur || null
+  let catalogCardmarketUrl = matchedCard?.cardmarket_url || null
+  let verifiedRarity = matchedCard?.rarity || null
+  let verifiedSetName = matchedCard?.set_name || null
+  let verifiedNumber = matchedCard?.number || null
+  let debugInfo = { cardName: matchedCard?.name || null, catalogHit: !!matchedCard?.id, source: matchedCard?.id ? 'embedding' : null }
 
-  try {
+  if (useGradingOnly && matchedCard?.name) {
+    debugInfo.cardName = matchedCard.name
+  }
+
+  if (!useGradingOnly) try {
     const raw = analysisText
     const start = raw.indexOf('{')
     const end = raw.lastIndexOf('}')
@@ -599,7 +609,43 @@ export default async function handler(req) {
   })
 }
 
-function buildPrompt(game, hasBack) {
+function buildGradingPrompt(game, card) {
+  const gameNames = { pokemon: 'Pokémon', mtg: 'Magic: The Gathering', yugioh: 'Yu-Gi-Oh!' }
+  const gameName = gameNames[game] || game || 'TCG'
+  const cardDesc = [card.name, card.rarity, card.set_name, card.number ? `#${card.number}` : null]
+    .filter(Boolean).join(' — ')
+
+  return `You are an expert ${gameName} card grader. The card shown is:
+${cardDesc}
+
+Your ONLY task is to assess the physical condition of this specific card.
+Do NOT try to identify the card — it is already identified above.
+Assume the card is Near Mint unless you observe specific defects.
+
+Grade these four dimensions carefully:
+- CENTERING: Measure how centered the card borders appear (left/right, top/bottom ratio)
+- CORNERS: Look for fraying, bending, wear at each of the four corners
+- EDGES: Inspect for chipping, roughness, whitening along card edges
+- SURFACE: Check for scratches, print lines, indentations, haze, holofoil damage
+
+Return ONLY valid JSON, no markdown, no extra text:
+{
+  "cardName": "${card.name}",
+  "finish": "${card.rarity || 'Unknown'}",
+  "confidence": "<High|Mid|Low>",
+  "centering": "<precise centering observation>",
+  "corners": "<corner condition>",
+  "edges": "<edge condition>",
+  "surface": "<surface condition>",
+  "mainIssues": ["<specific defect if any>"],
+  "worthGrading": <true|false>,
+  "estimatedPSAValue": "<NM market value estimate in EUR>",
+  "gradingFee": "~25€",
+  "recommendation": "<short actionable recommendation in English>"
+}`
+}
+
+function buildIdentifyPrompt(game, hasBack) {
   const gameNames = {
     pokemon: 'Pokémon',
     mtg: 'Magic: The Gathering',
