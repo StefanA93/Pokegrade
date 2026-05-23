@@ -668,14 +668,17 @@ SET NAME — CRITICAL: Read the SPECIFIC set name from the small text at the ver
 - If the text is in Japanese characters, unreadable, or you are unsure — return null. NEVER guess a set name.
 - Japanese-language cards: always return null for setName — do not guess an English equivalent.
 
-FINISH — Identify using BOTH the card number AND visual appearance. Number is more reliable than visual on foil cards.
+FINISH — Identify in this exact priority order:
 
-STEP 1 — NUMBER CHECK (most reliable, do this first):
+STEP 0 — PROMO CHECK (always first, overrides everything else):
+Look carefully at the card number area (bottom of card) and bottom corners for a "PROMO" stamp, a black star with "PROMO" text, or a code like "SVP EN 113" or "SWSH-EN043". Promo cards CAN have full-bleed edge-to-edge artwork — do NOT assume edge-to-edge art means SIR. If you see any promo marking → finish = Promo, regardless of artwork style.
+
+STEP 1 — NUMBER CHECK:
 - If card number X/Y where X ÷ Y > 0.80 (e.g. 191/197 = 97%) → card is in premium zone, cannot be Normal/Holo/Reverse Holo
 - If X > Y entirely (e.g. 215/197) → definitely Secret/Special Rare
 
-STEP 2 — VISUAL IDENTIFICATION (use these exact rules):
-★ Special Illustration Rare (SIR): The illustration covers the ENTIRE card face from edge to edge. You CANNOT see a rectangular border around the artwork. The Pokémon name appears as small white/metallic text floating directly over the illustration. The card background bleeds to all four edges. Attack/ability boxes appear as translucent overlays on the art. Dark cosmic, galaxy, nature scenes with no card frame = SIR.
+STEP 2 — VISUAL IDENTIFICATION (only if no promo stamp found):
+★ Special Illustration Rare (SIR): The illustration covers the ENTIRE card face from edge to edge. You CANNOT see a rectangular border around the artwork. The Pokémon name appears as small white/metallic text floating directly over the illustration. The card background bleeds to all four edges. Attack/ability boxes appear as translucent overlays on the art. Dark cosmic, galaxy, nature scenes with no card frame = SIR. ONLY call SIR if you confirmed NO promo stamp in Step 0.
 ★ Illustration Rare (IR): Art extends significantly beyond the standard art box but the card name area at the TOP still has partial standard frame elements. The overall layout is "partially standard, partially extended art."
 ★ Hyper Rare: Entire card including text has rainbow gradient shimmer. Standard card frame still visible underneath the rainbow effect.
 ★ Gold Secret Rare: Gold-colored card border, number exceeds set total, metallic gold text.
@@ -683,11 +686,12 @@ STEP 2 — VISUAL IDENTIFICATION (use these exact rules):
 ★ Reverse Holo: Standard card layout with a holofoil shimmer on the CARD BORDER and TEXT AREAS, but the artwork itself is flat/non-holo.
 ★ Normal / Common / Uncommon: No holofoil anywhere on the card.
 ★ Amazing Rare (AR): SWSH era only (Sword & Shield sets: Vivid Voltage, Fusion Strike, Brilliant Stars etc.). Rainbow/prismatic swirl fills the artwork area, NOT covering the text/HP areas. The card has a standard frame — art box border is visible. Different from Hyper Rare where the rainbow covers the entire card including text.
-★ Promo: A physical "PROMO" stamp or special event logo is clearly printed on the card. Do NOT call Promo if no stamp is visible — it is more likely a Holo Rare or Normal card.
+★ Promo: See Step 0 — promo stamp must be visible. Do NOT call Promo without a visible stamp.
 
-CRITICAL DISTINCTION — SIR vs Holo Rare:
+CRITICAL DISTINCTION — SIR vs Promo vs Holo Rare:
 - Holo Rare ALWAYS has a visible rectangular border around the artwork. You can see where the art box starts and ends.
-- SIR NEVER has an art box border. The illustration is the entire card. If you see a dark/cosmic/artistic background with no visible art box rectangle = SIR, not Holo Rare.
+- SIR NEVER has an art box border — but ALSO has NO promo stamp. Check for promo stamp before calling SIR.
+- Promo can look identical to SIR in artwork style but will have a promo stamp/code somewhere on the card.
 - A card cannot be Holo Rare if its number is above 80% of the set total.
 
 The card is assumed Near Mint — estimate market value at NM prices.
