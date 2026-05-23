@@ -515,21 +515,37 @@ function CameraModal({ onCapture, onClose }) {
       {/* Viewfinder overlay */}
       {!err && (
         <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', paddingBottom: 140 }}>
-          {/* Mørklagt ydre */}
-          <div style={{ position: 'absolute', inset: 0, background: '#0007' }} />
-          {/* Kortramme — 3:4 aspekt */}
-          <div style={{ position: 'relative', width: '62vw', aspectRatio: '3/4', maxWidth: 220 }}>
-            {/* Hjørnemarkeringer */}
-            {[['topleft', {top:0,left:0}], ['topright', {top:0,right:0}], ['bottomleft', {bottom:0,left:0}], ['bottomright', {bottom:0,right:0}]].map(([pos, s]) => (
-              <div key={pos} style={{ position: 'absolute', width: 24, height: 24, ...s }}>
-                <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: 3, background: COLORS.gold }} />
-                <div style={{ position: 'absolute', top: 0, left: 0, width: 3, height: '100%', background: COLORS.gold }} />
-              </div>
-            ))}
-            {/* Gennemsigtigt vindue */}
-            <div style={{ position: 'absolute', inset: 0, background: 'transparent', border: 'none' }} />
+          {/* Card frame — box-shadow creates the dark surround with a clear cutout window */}
+          <div style={{
+            position: 'relative',
+            width: '62vw',
+            aspectRatio: '3/4',
+            maxWidth: 220,
+            boxShadow: '0 0 0 9999px rgba(0,0,0,0.58)',
+            zIndex: 1,
+          }}>
+            {/* Top-left corner */}
+            <div style={{ position: 'absolute', top: 0, left: 0, width: 28, height: 28 }}>
+              <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: 3, background: COLORS.gold, borderRadius: '2px 0 0 0' }} />
+              <div style={{ position: 'absolute', top: 0, left: 0, width: 3, height: '100%', background: COLORS.gold, borderRadius: '2px 0 0 0' }} />
+            </div>
+            {/* Top-right corner */}
+            <div style={{ position: 'absolute', top: 0, right: 0, width: 28, height: 28 }}>
+              <div style={{ position: 'absolute', top: 0, right: 0, width: '100%', height: 3, background: COLORS.gold, borderRadius: '0 2px 0 0' }} />
+              <div style={{ position: 'absolute', top: 0, right: 0, width: 3, height: '100%', background: COLORS.gold, borderRadius: '0 2px 0 0' }} />
+            </div>
+            {/* Bottom-left corner */}
+            <div style={{ position: 'absolute', bottom: 0, left: 0, width: 28, height: 28 }}>
+              <div style={{ position: 'absolute', bottom: 0, left: 0, width: '100%', height: 3, background: COLORS.gold, borderRadius: '0 0 0 2px' }} />
+              <div style={{ position: 'absolute', bottom: 0, left: 0, width: 3, height: '100%', background: COLORS.gold, borderRadius: '0 0 0 2px' }} />
+            </div>
+            {/* Bottom-right corner */}
+            <div style={{ position: 'absolute', bottom: 0, right: 0, width: 28, height: 28 }}>
+              <div style={{ position: 'absolute', bottom: 0, right: 0, width: '100%', height: 3, background: COLORS.gold, borderRadius: '0 0 2px 0' }} />
+              <div style={{ position: 'absolute', bottom: 0, right: 0, width: 3, height: '100%', background: COLORS.gold, borderRadius: '0 0 2px 0' }} />
+            </div>
           </div>
-          <div style={{ marginTop: 16, fontSize: 13, color: '#ffffffaa', fontWeight: 600, letterSpacing: 0.3 }}>
+          <div style={{ marginTop: 20, fontSize: 13, color: '#ffffffcc', fontWeight: 600, letterSpacing: 0.3, zIndex: 1, textShadow: '0 1px 4px rgba(0,0,0,0.8)' }}>
             {ready ? 'Place the card face in the frame' : 'Starting camera…'}
           </div>
         </div>
