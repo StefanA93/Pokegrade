@@ -752,13 +752,22 @@ function ScanScreen({ user, profile, onScanDone, modelState, modelProgress }) {
         headers: authHeaders,
         body: JSON.stringify(analyzeBody),
       })
-      const data = await res.json()
+      let data
+      try {
+        data = await res.json()
+      } catch {
+        throw new Error('Server error — please try again in a moment')
+      }
       if (!res.ok) throw new Error(data.error || 'Analysis failed')
 
       const raw = data.analysis
       const start = raw.indexOf('{')
       const end = raw.lastIndexOf('}')
       const parsed = JSON.parse(raw.slice(start, end + 1))
+      // Normalize denominators where AI folds series prefix in: "100/XY123" → "100/123"
+      if (parsed.cardNumber) {
+        parsed.cardNumber = parsed.cardNumber.replace(/^(\d+)\/(XY|SV|SWSH|SM|BW|DP|HGSS)(\d+)$/i, '$1/$3')
+      }
 
       setResult({
         ...parsed,
