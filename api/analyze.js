@@ -153,6 +153,9 @@ export default async function handler(req) {
   let catalogId = null
   let catalogPriceEur = null
   let catalogCardmarketUrl = null
+  let verifiedRarity = null
+  let verifiedSetName = null
+  let verifiedNumber = null
   let debugInfo = { cardName: null, catalogHit: false }
 
   try {
@@ -201,7 +204,7 @@ export default async function handler(req) {
           Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
           'Content-Type': 'application/json',
         }
-        const fields = 'id,image_url,cardmarket_url,price_eur'
+        const fields = 'id,image_url,cardmarket_url,price_eur,rarity,set_name,number'
 
         // Map AI finish labels → pokemontcg.io rarity strings
         function finishToRarity(finish) {
@@ -251,6 +254,9 @@ export default async function handler(req) {
           catalogCardmarketUrl = row.cardmarket_url
           debugInfo.catalogHit = true
           debugInfo.source = strategy || 'supabase'
+          if (row.rarity) verifiedRarity = row.rarity
+          if (row.set_name) verifiedSetName = row.set_name
+          if (row.number) verifiedNumber = row.number
         }
 
         const nums = numVariants(cardNumber)
@@ -471,6 +477,10 @@ export default async function handler(req) {
               catalogCardmarketUrl = best.cardmarket?.url || null
               debugInfo.catalogHit = true
               debugInfo.source = 'ptcg'
+              verifiedRarity = best.rarity || null
+              verifiedSetName = best.set?.name || null
+              verifiedNumber = best.number || null
+              debugInfo.verified = `${verifiedRarity} · ${verifiedSetName} · #${verifiedNumber}`
             }
           } catch (ptcgErr) {
             debugInfo.ptcgError = ptcgErr.message
@@ -580,6 +590,9 @@ export default async function handler(req) {
     catalogId: catalogId || null,
     catalogPriceEur: catalogPriceEur || null,
     catalogCardmarketUrl: catalogCardmarketUrl || null,
+    verifiedRarity: verifiedRarity || null,
+    verifiedSetName: verifiedSetName || null,
+    verifiedNumber: verifiedNumber || null,
     debugInfo,
   }), {
     headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
@@ -601,7 +614,10 @@ function buildPrompt(game, hasBack) {
 
 CARD NUMBER — CRITICAL: The second image is an enlarged crop of the bottom of the card — use it to read the number (e.g. "045/165" or "215/197"). Secret/Special Rares have numbers ABOVE set total. Return null ONLY if completely unreadable even in the enlarged view.
 
-SET NAME — CRITICAL: Read the SPECIFIC set name from the copyright line at the very bottom of the card (e.g. "Obsidian Flames", "Paradox Rift", "Paldean Fates", "Temporal Forces"). Do NOT return a series name like "Scarlet & Violet" — return the exact product name printed on the card.
+SET NAME — CRITICAL: Read the SPECIFIC set name from the small text at the very bottom of the card (e.g. "Obsidian Flames", "Paradox Rift", "Paldean Fates", "Temporal Forces", "Twilight Masquerade").
+- Do NOT return a series name like "Scarlet & Violet" — return the exact product set name.
+- If the text is in Japanese characters, unreadable, or you are unsure — return null. NEVER guess a set name.
+- Japanese-language cards: always return null for setName — do not guess an English equivalent.
 
 FINISH — Identify using BOTH the card number AND visual appearance. Number is more reliable than visual on foil cards.
 
@@ -617,7 +633,8 @@ STEP 2 — VISUAL IDENTIFICATION (use these exact rules):
 ★ Holo Rare: Standard rectangular art box is CLEARLY VISIBLE. Holofoil pattern appears ONLY inside the artwork rectangle. Card name, HP bar, and all text areas are in the standard non-holo layout. The border of the art box is always visible.
 ★ Reverse Holo: Standard card layout with a holofoil shimmer on the CARD BORDER and TEXT AREAS, but the artwork itself is flat/non-holo.
 ★ Normal / Common / Uncommon: No holofoil anywhere on the card.
-★ Promo: A "PROMO" stamp or special event logo is printed on the card.
+★ Amazing Rare (AR): SWSH era only (Sword & Shield sets: Vivid Voltage, Fusion Strike, Brilliant Stars etc.). Rainbow/prismatic swirl fills the artwork area, NOT covering the text/HP areas. The card has a standard frame — art box border is visible. Different from Hyper Rare where the rainbow covers the entire card including text.
+★ Promo: A physical "PROMO" stamp or special event logo is clearly printed on the card. Do NOT call Promo if no stamp is visible — it is more likely a Holo Rare or Normal card.
 
 CRITICAL DISTINCTION — SIR vs Holo Rare:
 - Holo Rare ALWAYS has a visible rectangular border around the artwork. You can see where the art box starts and ends.

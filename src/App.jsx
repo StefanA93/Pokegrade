@@ -626,6 +626,9 @@ function ScanScreen({ user, profile, onScanDone }) {
         catalogId: data.catalogId || null,
         catalogPriceEur: data.catalogPriceEur || null,
         catalogCardmarketUrl: data.catalogCardmarketUrl || null,
+        verifiedRarity: data.verifiedRarity || null,
+        verifiedSetName: data.verifiedSetName || null,
+        verifiedNumber: data.verifiedNumber || null,
         _debug: data.debugInfo || null,
       })
       onScanDone()
@@ -732,13 +735,13 @@ function GradeResult({ result, game, frontImg, user, onSave }) {
       name: result.cardName || result.name || result.kortNavn || null,
       game,
       grade: 7,
-      finish: result.finish || null,
+      finish: result.verifiedRarity || result.finish || null,
       value: valueNum,
       price_range: result.estimatedPSAValue || null,
       image_url: result.officialImageUrl || imageUrl,
       notes: result.recommendation,
-      card_number: result.cardNumber || null,
-      set_name: result.setName || null,
+      card_number: result.verifiedNumber || result.cardNumber || null,
+      set_name: result.verifiedSetName || result.setName || null,
       catalog_id: result.catalogId || null,
     })
     if (error) {
@@ -799,9 +802,25 @@ function GradeResult({ result, game, frontImg, user, onSave }) {
           {/* Kortnavn + grade */}
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 12, color: COLORS.muted, marginBottom: 2, textTransform: 'uppercase', letterSpacing: 0.8, fontWeight: 600 }}>AI Analysis Result</div>
-            <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 12, lineHeight: 1.3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 4, lineHeight: 1.3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {result.cardName || 'Unknown Card'}
             </div>
+            {(result.verifiedRarity || result.finish || result.verifiedSetName || result.setName) && (
+              <div style={{ fontSize: 11, marginBottom: 10, lineHeight: 1.5 }}>
+                <span style={{ color: COLORS.gold, fontWeight: 700 }}>
+                  {result.verifiedRarity || result.finish}
+                </span>
+                {(result.verifiedSetName || result.setName) && (
+                  <span style={{ color: COLORS.muted }}> · {result.verifiedSetName || result.setName}</span>
+                )}
+                {(result.verifiedNumber || result.cardNumber) && (
+                  <span style={{ color: COLORS.muted }}> · #{result.verifiedNumber || result.cardNumber}</span>
+                )}
+                {result.verifiedRarity && (
+                  <span style={{ color: COLORS.success, fontSize: 10 }}> ✓</span>
+                )}
+              </div>
+            )}
 
             {/* Condition badge — Near Mint */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -893,8 +912,11 @@ function GradeResult({ result, game, frontImg, user, onSave }) {
             <div style={{ color: COLORS.gold, fontWeight: 700, marginBottom: 4 }}>🔍 Catalog Debug</div>
             <div>AI name: <b style={{ color: '#fff' }}>{result.cardName || '—'}</b> · HP: <b style={{ color: result._debug.hp ? COLORS.success : '#666' }}>{result._debug.hp || '—'}</b> · era: <b style={{ color: '#fff' }}>{result._debug.setEra || '—'}</b></div>
             <div>AI ability: <b style={{ color: result._debug.ability ? '#a78bfa' : '#666' }}>{result._debug.ability || 'none'}</b></div>
-            <div>AI number: <b style={{ color: result.cardNumber ? COLORS.success : COLORS.danger }}>{result.cardNumber || 'null'}</b> · set: <b style={{ color: '#fff' }}>{result.setName || '—'}</b></div>
-            <div>AI finish: <b style={{ color: result.finish ? COLORS.success : COLORS.danger }}>{result.finish || 'null'}</b>{result._debug.finishOverride ? <span style={{ color: '#e67e22' }}> ⚠ {result._debug.finishOverride}</span> : null}</div>
+            <div>AI  num: <b style={{ color: result.cardNumber ? '#fff' : COLORS.danger }}>{result.cardNumber || 'null'}</b> · set: <b style={{ color: '#fff' }}>{result.setName || 'null'}</b></div>
+            <div>AI  fin: <b style={{ color: result.finish ? '#fff' : COLORS.danger }}>{result.finish || 'null'}</b>{result._debug.finishOverride ? <span style={{ color: '#e67e22' }}> ⚠ {result._debug.finishOverride}</span> : null}</div>
+            {(result.verifiedRarity || result.verifiedSetName) && (
+              <div>DB  <b style={{ color: COLORS.gold }}>{result.verifiedRarity || '—'}</b> · <b style={{ color: COLORS.gold }}>{result.verifiedSetName || '—'}</b> · <b style={{ color: COLORS.gold }}>#{result.verifiedNumber || '?'}</b></div>
+            )}
             <div>ptcg pass: <b style={{ color: '#fff' }}>{result._debug.ptcgQ || '—'}</b> · <b style={{ color: result._debug.ptcgCount > 0 ? COLORS.success : COLORS.danger }}>{result._debug.ptcgCount ?? '?'} hits</b>{result._debug.pickScore != null ? <span style={{ color: '#a78bfa' }}> · score {result._debug.pickScore}%</span> : null}</div>
             <div>Strategy: <b style={{ color: '#fff' }}>{result._debug.source || '—'}</b> · ID: <b style={{ color: '#fff' }}>{result.catalogId || '—'}</b> · key: <b style={{ color: result._debug.hasApiKey ? COLORS.success : COLORS.danger }}>{result._debug.hasApiKey ? '✓' : '✗'}</b></div>
             {result._debug.ptcgStatus && <div style={{ color: '#e67e22' }}>ptcg HTTP {result._debug.ptcgStatus} (Vercel IP blokeret?)</div>}
