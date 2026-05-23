@@ -545,7 +545,7 @@ function CameraModal({ onCapture, onClose }) {
 }
 
 // SCAN SCREEN
-function ScanScreen({ user, profile, onScanDone }) {
+function ScanScreen({ user, profile, onScanDone, modelState, modelProgress }) {
   const [game, setGame] = useState('pokemon')
   const [frontImg, setFrontImg] = useState(null)
   const [backImg, setBackImg] = useState(null)
@@ -723,6 +723,21 @@ function ScanScreen({ user, profile, onScanDone }) {
       <Btn onClick={analyze} disabled={loading || !frontImg}>
         {loading ? <><Spinner size={18} color="#0a0a12" /> Analyzing...</> : '🔍 Analyze Card'}
       </Btn>
+
+      {/* Vision model status */}
+      {modelState === 'loading' && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0', justifyContent: 'center' }}>
+          <Spinner size={12} color={COLORS.muted} />
+          <span style={{ fontSize: 11, color: COLORS.muted }}>
+            Loading vision model{modelProgress > 0 ? ` ${modelProgress}%` : '…'}
+          </span>
+        </div>
+      )}
+      {modelState === 'ready' && (
+        <div style={{ textAlign: 'center', fontSize: 11, color: COLORS.success, padding: '4px 0' }}>
+          ✦ Vision model ready — embedding search active
+        </div>
+      )}
 
       {/* Result */}
       {result && <GradeResult result={result} game={game} frontImg={frontImg} user={user} onSave={() => { setResult(null); setFrontImg(null); setBackImg(null); onScanDone() }} />}
@@ -2039,6 +2054,8 @@ export default function App() {
   const [loading, setLoading] = useState(true)
   const [splashDone, setSplashDone] = useState(false)
   const [splashFading, setSplashFading] = useState(false)
+  const [modelState, setModelState] = useState('idle') // idle | loading | ready | error
+  const [modelProgress, setModelProgress] = useState(0)
 
   useEffect(() => {
     // Inject global styles
@@ -2087,6 +2104,29 @@ export default function App() {
     const minTimer = setTimeout(() => setSplashDone(true), 1800)
     return () => clearTimeout(minTimer)
   }, [])
+
+  // Preload CLIP model in background after login — ready before first scan
+  useEffect(() => {
+    if (!session) return
+    let cancelled = false
+    async function preload() {
+      try {
+        setModelState('loading')
+        const { loadEmbeddingModel } = await import('./recognition/EmbeddingExtractor.js')
+        await loadEmbeddingModel(({ status, progress }) => {
+          if (cancelled) return
+          if (status === 'progress' && typeof progress === 'number') {
+            setModelProgress(Math.round(progress))
+          }
+        })
+        if (!cancelled) setModelState('ready')
+      } catch {
+        if (!cancelled) setModelState('error')
+      }
+    }
+    preload()
+    return () => { cancelled = true }
+  }, [session])
 
   const showSplash = loading || !splashDone
 
@@ -2140,7 +2180,7 @@ export default function App() {
       <div style={{ background: COLORS.bg, minHeight: '100dvh' }}>
         {tab === 'home'       && <HomeScreen user={session.user} profile={profile} onGoScan={() => setTab('scan')} onViewAll={() => setTab('collection')} />}
         {tab === 'search'     && <SearchScreen onSelectGame={gameId => { setSearchGameFilter(gameId); setTab('collection') }} />}
-        {tab === 'scan'       && <ScanScreen user={session.user} profile={profile} onScanDone={() => loadProfile(session.user.id)} />}
+        {tab === 'scan'       && <ScanScreen user={session.user} profile={profile} onScanDone={() => loadProfile(session.user.id)} modelState={modelState} modelProgress={modelProgress} />}
         {tab === 'collection' && <CollectionScreen user={session.user} initialGame={searchGameFilter} onClearFilter={() => setSearchGameFilter(null)} />}
         {tab === 'settings'   && <SettingsScreen user={session.user} profile={profile} onSignOut={() => setSession(null)} />}
         <BottomNav tab={tab} setTab={setTab} />
