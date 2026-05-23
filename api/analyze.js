@@ -286,14 +286,23 @@ export default async function handler(req) {
           }
 
           // Pick best card from a list of candidates
-          const pickBest = (cards, targetRarityStr, targetNums) => {
+          const pickBest = (cards, targetRarityStr, targetNums, targetSetName) => {
             if (!cards.length) return null
             // English-only list (Japanese set IDs typically start with r, j, or have jp/ko suffix)
             const englishCards = cards.filter(c => {
               const sid = c.set?.id || ''
               return !sid.startsWith('rsv') && !sid.startsWith('svsv') && c.set?.series !== 'Japanese'
             })
-            const pool = englishCards.length ? englishCards : cards
+            let pool = englishCards.length ? englishCards : cards
+
+            // Prefer cards from the AI-identified set when multiple results present
+            if (targetSetName && pool.length > 1) {
+              const setMatch = pool.filter(c =>
+                c.set?.name?.toLowerCase().includes(targetSetName.toLowerCase()) ||
+                targetSetName.toLowerCase().includes(c.set?.name?.toLowerCase() || '')
+              )
+              if (setMatch.length) pool = setMatch
+            }
 
             // 1. Number + rarity exact match
             if (targetNums?.length && targetRarityStr) {
@@ -347,9 +356,14 @@ export default async function handler(req) {
             }
 
             // Pass 3b: name + card number — finds SIRs/Secrets that may not appear in top-10 name-only
+            // Try exact number as given (e.g. "072"), then stripped of leading zeros ("72")
             if (!candidates.length && cardNumber) {
-              const mainNum = cardNumber.split('/')[0].trim().replace(/^0+(?=\d)/, '')
-              candidates = await queryPtcg(`name:"${cardName}" number:${mainNum}`, 5)
+              const rawNum = cardNumber.split('/')[0].trim()
+              const strippedNum = rawNum.replace(/^0+(?=\d)/, '')
+              candidates = await queryPtcg(`name:"${cardName}" number:${rawNum}`, 5)
+              if (!candidates.length && strippedNum !== rawNum) {
+                candidates = await queryPtcg(`name:"${cardName}" number:${strippedNum}`, 5)
+              }
               debugInfo.ptcgQ = `name+number`
             }
 
@@ -373,7 +387,7 @@ export default async function handler(req) {
 
             debugInfo.ptcgCount = candidates.length
 
-            const best = pickBest(candidates, ptcgRarityStr, nums.length ? nums : null)
+            const best = pickBest(candidates, ptcgRarityStr, nums.length ? nums : null, normSet)
             if (best) {
               catalogId = best.id
               officialImageUrl = best.images?.large || best.images?.small || null
