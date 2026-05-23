@@ -164,7 +164,14 @@ export default async function handler(req) {
       const cardName = parsed.cardName || null
       const cardNumber = parsed.cardNumber || null
       const setName = parsed.setName || null
+      const ability = parsed.ability || null
+      const attacks = Array.isArray(parsed.attacks) ? parsed.attacks.filter(Boolean) : []
+      const hp = parsed.hp ? String(parsed.hp) : null
+      const setEra = parsed.setEra || null
       debugInfo.cardName = cardName
+      debugInfo.ability = ability
+      debugInfo.hp = hp
+      debugInfo.setEra = setEra
 
       // Number-based finish override — card number in premium zone cannot be Holo/Normal
       // e.g. 191/197 = 97% → must be SIR/IR/Secret, not Holo Rare
@@ -297,25 +304,33 @@ export default async function handler(req) {
 
           debugInfo.hasApiKey = !!PTCG_API_KEY
 
+          const ERA_TO_SET_PREFIX = {
+            'SV': 'sv', 'SWSH': 'swsh', 'SM': 'sm', 'XY': 'xy',
+            'BW': 'bw', 'HGSS': 'hgss', 'DP': 'dp', 'EX': 'ex', 'NEO': 'neo'
+          }
+
           const queryPtcg = async (q, size = 10) => {
-            const url = `https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(q)}&orderBy=-set.releaseDate&pageSize=${size}&select=id,images,cardmarket,set,rarity,number`
+            const url = `https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(q)}&orderBy=-set.releaseDate&pageSize=${size}&select=id,images,cardmarket,set,rarity,number,abilities,attacks,hp`
             const r = await fetch(url, { headers: ptcgHeaders })
             if (!r.ok) { debugInfo.ptcgStatus = r.status; return [] }
             const d = await r.json()
             return d.data || []
           }
 
-          // Pick best card from a list of candidates
-          const pickBest = (cards, targetRarityStr, targetNums, targetSetName) => {
+          // Pick best card using multi-signal scoring: ability(0.40) + attacks(0.30) + hp(0.15) + number(0.10) + rarity(0.05)
+          const pickBest = (cards, targetRarityStr, targetNums, targetSetName, targetAbility, targetAttacks, targetHp) => {
             if (!cards.length) return null
-            // English-only list (Japanese set IDs typically start with r, j, or have jp/ko suffix)
             const englishCards = cards.filter(c => {
               const sid = c.set?.id || ''
               return !sid.startsWith('rsv') && !sid.startsWith('svsv') && c.set?.series !== 'Japanese'
             })
             let pool = englishCards.length ? englishCards : cards
 
-            // Prefer cards from the AI-identified set when multiple results present
+            if (setEra && ERA_TO_SET_PREFIX[setEra] && pool.length > 1) {
+              const eraMatch = pool.filter(c => (c.set?.id || '').startsWith(ERA_TO_SET_PREFIX[setEra]))
+              if (eraMatch.length) pool = eraMatch
+            }
+
             if (targetSetName && pool.length > 1) {
               const setMatch = pool.filter(c =>
                 c.set?.name?.toLowerCase().includes(targetSetName.toLowerCase()) ||
@@ -324,28 +339,51 @@ export default async function handler(req) {
               if (setMatch.length) pool = setMatch
             }
 
-            // 1. Number + rarity exact match
+            const hasSignals = !!(targetAbility || targetAttacks?.length || targetHp)
+            if (hasSignals) {
+              const scored = pool.map(c => {
+                let score = 0
+                if (targetAbility) {
+                  const cardAbilities = (c.abilities || []).map(a => (a.name || '').toLowerCase())
+                  if (cardAbilities.some(a => a.includes(targetAbility.toLowerCase()))) score += 0.40
+                }
+                if (targetAttacks?.length) {
+                  const cardAttacks = (c.attacks || []).map(a => (a.name || '').toLowerCase())
+                  const matched = targetAttacks.filter(atk => cardAttacks.some(ca => ca.includes(atk.toLowerCase()))).length
+                  score += (matched / targetAttacks.length) * 0.30
+                }
+                if (targetHp && c.hp === targetHp) score += 0.15
+                if (targetNums?.length && targetNums.includes(c.number)) score += 0.10
+                if (targetRarityStr) {
+                  const kw = targetRarityStr.toLowerCase().split(' ')[0]
+                  if (c.rarity?.toLowerCase().includes(kw)) score += 0.05
+                }
+                return { card: c, score }
+              })
+              scored.sort((a, b) => b.score - a.score)
+              if (scored[0].score > 0) {
+                debugInfo.pickScore = Math.round(scored[0].score * 100)
+                return scored[0].card
+              }
+            }
+
             if (targetNums?.length && targetRarityStr) {
               for (const num of targetNums) {
                 const m = pool.find(c => c.number === num && c.rarity?.toLowerCase().includes(targetRarityStr.toLowerCase().split(' ')[0]))
                 if (m) return m
               }
             }
-            // 2. Exact number match (any rarity)
             if (targetNums?.length) {
               for (const num of targetNums) {
                 const m = pool.find(c => c.number === num)
                 if (m) return m
               }
             }
-            // 3. Rarity match — newest English card with matching rarity
             if (targetRarityStr) {
               const keyword = targetRarityStr.toLowerCase().split(' ')[0]
               const m = pool.find(c => c.rarity?.toLowerCase().includes(keyword))
               if (m) return m
             }
-            // 4. Newest English card — but NOT for premium finishes with a known number
-            // (returning wrong card is worse than returning null for SIR/Secret/IR etc.)
             const isPremiumFinish = targetRarityStr &&
               /special|illustration|hyper|secret|rainbow|ultra|shiny|amazing|radiant|prism/i.test(targetRarityStr)
             if (targetNums?.length && isPremiumFinish) return null
@@ -357,8 +395,26 @@ export default async function handler(req) {
           try {
             let candidates = []
 
+            // Pass 0a: ability name — most precise identifier (large printed text, not foil)
+            if (ability) {
+              candidates = await queryPtcg(`name:"${cardName}" abilities.name:"${ability.replace(/"/g, '')}"`)
+              if (candidates.length) debugInfo.ptcgQ = `ability:${ability}`
+            }
+
+            // Pass 0b: first attack name
+            if (!candidates.length && attacks.length > 0) {
+              candidates = await queryPtcg(`name:"${cardName}" attacks.name:"${attacks[0].replace(/"/g, '')}"`)
+              if (candidates.length) debugInfo.ptcgQ = `attack:${attacks[0]}`
+            }
+
+            // Pass 0c: HP — narrows to specific card version
+            if (!candidates.length && hp) {
+              candidates = await queryPtcg(`name:"${cardName}" hp:${hp}`)
+              if (candidates.length) debugInfo.ptcgQ = `name+hp:${hp}`
+            }
+
             // Pass 1: name + specific set name (skip if it's a generic series name)
-            if (normSet && !SERIES_NAMES.has(normSet)) {
+            if (!candidates.length && normSet && !SERIES_NAMES.has(normSet)) {
               candidates = await queryPtcg(`name:"${cardName}" set.name:"${normSet}"`)
               debugInfo.ptcgQ = `name+set`
             }
@@ -407,7 +463,7 @@ export default async function handler(req) {
 
             debugInfo.ptcgCount = candidates.length
 
-            const best = pickBest(candidates, ptcgRarityStr, nums.length ? nums : null, normSet)
+            const best = pickBest(candidates, ptcgRarityStr, nums.length ? nums : null, normSet, ability, attacks, hp)
             if (best) {
               catalogId = best.id
               officialImageUrl = best.images?.large || best.images?.small || null
@@ -570,12 +626,22 @@ CRITICAL DISTINCTION — SIR vs Holo Rare:
 
 The card is assumed Near Mint — estimate market value at NM prices.
 
+ABILITY & ATTACKS — Read these from the card body text (large, clear font — not foil). These are the most reliable identifiers.
+- "Ability: [Name]" printed above the ability description box
+- Attack names printed in bold before each attack's cost and damage
+- HP number printed in the top-right corner of the card
+
 Return ONLY valid JSON, no markdown, no extra text:
 {
   "cardName": "<name exactly as printed on card>",
   "cardNumber": "<number e.g. 045/165 — null only if unreadable in BOTH images>",
   "setName": "<specific set name from copyright line e.g. Obsidian Flames, Paradox Rift, Paldean Fates — null if unreadable, NEVER a description of why it is unreadable>",
   "finish": "<one of: Normal | Holo Rare | Reverse Holo | Full Art | Secret Rare | Hyper Rare | Special Illustration Rare | Illustration Rare | Gold Secret Rare | Amazing Rare | Shiny Rare | Radiant Rare | Prism Star | 1st Edition | Shadowless | Promo — REQUIRED, never null for Pokémon>",
+  "ability": "<ability name exactly as printed e.g. Distorted Future — null if card has no Ability>",
+  "attacks": ["<attack 1 name>", "<attack 2 name>"],
+  "hp": "<HP number only e.g. 150 — null if not a Pokémon>",
+  "supertype": "<Basic|Stage 1|Stage 2|ex|V|VMAX|VSTAR|GX|EX|Trainer|Energy>",
+  "setEra": "<SV|SWSH|SM|XY|BW|HGSS|DP|EX|NEO|BASE — era the card belongs to>",
   "confidence": "<High|Mid|Low>",
   "centering": "<centering description>",
   "corners": "<corners description>",
