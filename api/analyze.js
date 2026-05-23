@@ -535,6 +535,30 @@ export default async function handler(req) {
               debugInfo.ptcgQ = `name-partial`
             }
 
+            // Pass 6: ability-only — last resort when name is OCR-misread (e.g. "Gochitelle" → "Gothitelle")
+            // Finds the card by unique ability name even when the card name is completely wrong
+            if (!candidates.length && ability) {
+              const allAbility = await queryPtcg(`abilities.name:"${ability.replace(/"/g, '')}"`, 20)
+              // Filter to correct era to avoid wrong generation matches
+              const eraPrefix = setEra ? ERA_TO_SET_PREFIX[setEra] : null
+              candidates = eraPrefix
+                ? allAbility.filter(c => (c.set?.id || '').startsWith(eraPrefix))
+                : allAbility
+              if (!candidates.length) candidates = allAbility
+              if (candidates.length) debugInfo.ptcgQ = `ability-only:${ability}`
+            }
+
+            // Pass 6b: attack-only — last resort when name is wrong and no ability
+            if (!candidates.length && attacks.length > 0) {
+              const allAttack = await queryPtcg(`attacks.name:"${attacks[0].replace(/"/g, '')}"`, 20)
+              const eraPrefix = setEra ? ERA_TO_SET_PREFIX[setEra] : null
+              candidates = eraPrefix
+                ? allAttack.filter(c => (c.set?.id || '').startsWith(eraPrefix))
+                : allAttack
+              if (!candidates.length) candidates = allAttack
+              if (candidates.length) debugInfo.ptcgQ = `attack-only:${attacks[0]}`
+            }
+
             debugInfo.ptcgCount = candidates.length
 
             const best = pickBest(candidates, ptcgRarityStr, nums.length ? nums : null, normSet, ability, attacks, hp)
