@@ -186,20 +186,23 @@ export default async function handler(req) {
       debugInfo.hp = hp
       debugInfo.setEra = setEra
 
-      // Number-based finish override — card number in premium zone cannot be Holo/Normal
-      // e.g. 191/197 = 97% → must be SIR/IR/Secret, not Holo Rare
+      // Number-based finish override
       let parsedFinishOverride = null
-      if (parsed.finish && cardNumber?.includes('/') && game === 'pokemon') {
-        const parts = cardNumber.split('/')
-        const num = parseInt(parts[0].replace(/\D/g, ''), 10)
-        const total = parseInt(parts[1].replace(/\D/g, ''), 10)
-        const NON_PREMIUM = ['Normal', 'Holo Rare', 'Reverse Holo', 'Common', 'Uncommon']
-        if (!isNaN(num) && !isNaN(total) && total > 0 && NON_PREMIUM.includes(parsed.finish)) {
-          const ratio = num / total
-          if (ratio > 0.80) {
-            parsedFinishOverride = 'Special Illustration Rare'
-            debugInfo.finishOverride = `${parsed.finish}→SIR (${num}/${total}=${Math.round(ratio*100)}%)`
-          } else if (num > total) {
+      if (game === 'pokemon') {
+        // Promo detection: promo card numbers NEVER contain '/' (e.g. "SVP EN 113", "SWSH052")
+        // Standard set cards always use X/Y format. No slash = promo.
+        if (cardNumber && !cardNumber.includes('/') && cardNumber.trim().length > 1) {
+          parsedFinishOverride = 'Promo'
+          debugInfo.finishOverride = `promo-number:${cardNumber}`
+        } else if (parsed.finish && cardNumber?.includes('/')) {
+          const parts = cardNumber.split('/')
+          const num = parseInt(parts[0].replace(/\D/g, ''), 10)
+          const total = parseInt(parts[1].replace(/\D/g, ''), 10)
+          const NON_PREMIUM = ['Normal', 'Holo Rare', 'Reverse Holo', 'Common', 'Uncommon']
+          // Only override when number strictly EXCEEDS set total (genuine secret zone: X > Y).
+          // Cards at 80-100% of total are WITHIN the set and can be IR, Ultra Rare or Double Rare
+          // — do NOT auto-upgrade those to SIR, that was incorrect.
+          if (!isNaN(num) && !isNaN(total) && total > 0 && num > total && NON_PREMIUM.includes(parsed.finish)) {
             parsedFinishOverride = 'Secret Rare'
             debugInfo.finishOverride = `${parsed.finish}→Secret (${num}>${total})`
           }
@@ -224,7 +227,9 @@ export default async function handler(req) {
             'Hyper Rare': 'Rare Rainbow',
             'Secret Rare': 'Rare Secret',
             'Gold Secret Rare': 'Rare Secret',
+            'Ultra Rare': 'Rare Ultra',
             'Full Art': 'Rare Ultra',
+            'Double Rare': 'Rare Holo ex',
             'Holo Rare': 'Rare Holo',
             'Reverse Holo': 'Rare Holo V',
             'Shiny Rare': 'Shiny Rare',
@@ -283,7 +288,9 @@ export default async function handler(req) {
           'Hyper Rare':                'rarity:"Rare Rainbow"',
           'Secret Rare':               'rarity:"Rare Secret"',
           'Gold Secret Rare':          'rarity:"Rare Secret"',
+          'Ultra Rare':                'rarity:"Rare Ultra"',
           'Full Art':                  'rarity:"Rare Ultra"',
+          'Double Rare':               'rarity:"Rare Holo ex"',
           'Holo Rare':                 'rarity:"Rare Holo"',
           'Shiny Rare':                'rarity:"Shiny Rare"',
           'Amazing Rare':              'rarity:"Amazing Rare"',
@@ -318,6 +325,34 @@ export default async function handler(req) {
             'Sun & Moon': 'sm1', 'XY': 'xy1', 'Black & White': 'bw1',
             'HeartGold SoulSilver': 'hgss1', 'HeartGold & SoulSilver': 'hgss1',
             'Diamond & Pearl': 'dp1',
+          }
+          // Exact set name → pokemontcg.io set ID — enables direct set.id lookup (most precise)
+          const SET_NAME_TO_ID = {
+            // Scarlet & Violet
+            'Scarlet & Violet': 'sv1', 'Paldea Evolved': 'sv2', 'Obsidian Flames': 'sv3',
+            'Scarlet & Violet 151': 'sv3pt5', '151': 'sv3pt5',
+            'Paradox Rift': 'sv4', 'Paldean Fates': 'sv4pt5',
+            'Temporal Forces': 'sv5', 'Twilight Masquerade': 'sv6',
+            'Shrouded Fable': 'sv6pt5', 'Stellar Crown': 'sv7',
+            'Surging Sparks': 'sv8', 'Prismatic Evolutions': 'sv8pt5',
+            'Destined Rivals': 'sv9', 'Black Bolt': 'sv10', 'White Flare': 'sv10',
+            // Sword & Shield
+            'Sword & Shield': 'swsh1', 'Rebel Clash': 'swsh2', 'Darkness Ablaze': 'swsh3',
+            'Vivid Voltage': 'swsh4', 'Battle Styles': 'swsh5', 'Chilling Reign': 'swsh6',
+            'Evolving Skies': 'swsh7', 'Fusion Strike': 'swsh8', 'Brilliant Stars': 'swsh9',
+            'Astral Radiance': 'swsh10', 'Lost Origin': 'swsh11', 'Silver Tempest': 'swsh12',
+            'Crown Zenith': 'swsh12pt5',
+            // Sun & Moon
+            'Sun & Moon': 'sm1', 'Guardians Rising': 'sm2', 'Burning Shadows': 'sm3',
+            'Shining Legends': 'sm3pt5', 'Crimson Invasion': 'sm4', 'Ultra Prism': 'sm5',
+            'Forbidden Light': 'sm6', 'Celestial Storm': 'sm7', 'Dragon Majesty': 'sm7a',
+            'Lost Thunder': 'sm8', 'Team Up': 'sm9', 'Unbroken Bonds': 'sm10',
+            'Unified Minds': 'sm11', 'Cosmic Eclipse': 'sm12',
+            // XY
+            'XY': 'xy1', 'Flashfire': 'xy2', 'Furious Fists': 'xy3', 'Phantom Forces': 'xy4',
+            'Primal Clash': 'xy5', 'Roaring Skies': 'xy6', 'Ancient Origins': 'xy7',
+            'BREAKthrough': 'xy8', 'BREAKpoint': 'xy9', 'Fates Collide': 'xy10',
+            'Steam Siege': 'xy11', 'Evolutions': 'xy12',
           }
 
           debugInfo.hasApiKey = !!PTCG_API_KEY
@@ -414,8 +449,28 @@ export default async function handler(req) {
           try {
             let candidates = []
 
+            // Pass 0_direct: exact set name → set.id lookup (most precise — skips fuzzy matching)
+            // Only runs when AI returns a known specific set name (not a series name)
+            const knownSetId = normSet ? SET_NAME_TO_ID[normSet] : null
+            if (knownSetId && cardName) {
+              const rawNum = cardNumber?.split('/')?.[0]?.trim()
+              const strippedNum = rawNum ? rawNum.replace(/^0+(?=\d)/, '') : null
+              // Try: name + set.id + number (most specific)
+              if (rawNum) {
+                candidates = await queryPtcg(`name:"${cardName}" set.id:${knownSetId} number:${rawNum}`, 5)
+                if (!candidates.length && strippedNum && strippedNum !== rawNum) {
+                  candidates = await queryPtcg(`name:"${cardName}" set.id:${knownSetId} number:${strippedNum}`, 5)
+                }
+              }
+              // Fallback: name + set.id only
+              if (!candidates.length) {
+                candidates = await queryPtcg(`name:"${cardName}" set.id:${knownSetId}`, 10)
+              }
+              if (candidates.length) debugInfo.ptcgQ = `name+setId:${knownSetId}`
+            }
+
             // Pass 0a: ability name — most precise identifier (large printed text, not foil)
-            if (ability) {
+            if (!candidates.length && ability) {
               candidates = await queryPtcg(`name:"${cardName}" abilities.name:"${ability.replace(/"/g, '')}"`)
               if (candidates.length) debugInfo.ptcgQ = `ability:${ability}`
             }
@@ -562,7 +617,7 @@ export default async function handler(req) {
 
         // Strategy 5b: name only — only for non-premium finishes (avoids returning wrong common/uncommon card)
         const isPremiumFinish = parsedFinish &&
-          /Special Illustration|Illustration Rare|Hyper Rare|Secret Rare|Gold Secret|Full Art|Shiny Rare|Amazing Rare|Radiant Rare|Prism Star/i.test(parsedFinish)
+          /Special Illustration|Illustration Rare|Hyper Rare|Secret Rare|Gold Secret|Ultra Rare|Full Art|Shiny Rare|Amazing Rare|Radiant Rare|Prism Star/i.test(parsedFinish)
         if (!catalogId && !isPremiumFinish) {
           const rows = await tryFetch(
             `${SUPABASE_URL}/rest/v1/card_catalog?${gameFilter}&${nameFilter}${langFilter}&select=${fields}&order=id.desc&limit=1`
@@ -661,38 +716,49 @@ function buildIdentifyPrompt(game, hasBack) {
 
   return `You are an expert ${gameName} card identifier. Analyze ${hasBack ? 'these two images (front and back)' : 'this card image'} and identify the card with maximum precision.
 
-CARD NUMBER — CRITICAL: The second image is an enlarged crop of the bottom of the card — use it to read the number (e.g. "045/165" or "215/197"). Secret/Special Rares have numbers ABOVE set total. Return null ONLY if completely unreadable even in the enlarged view.
+CARD NUMBER — CRITICAL: The second image is an enlarged crop of the bottom of the card.
+- Standard set cards: number is ALWAYS in "X/Y" format (e.g. "045/165", "215/197")
+- Promo cards: number is NEVER in X/Y format — it is a standalone code (e.g. "SVP EN 113", "SWSH052", "SM229")
+- If you see a promo code without "/" → return it exactly as-is and set finish = Promo
+- Return null ONLY if completely unreadable
 
-SET NAME — CRITICAL: Read the SPECIFIC set name from the small text at the very bottom of the card (e.g. "Obsidian Flames", "Paradox Rift", "Paldean Fates", "Temporal Forces", "Twilight Masquerade").
-- Do NOT return a series name like "Scarlet & Violet" — return the exact product set name.
-- If the text is in Japanese characters, unreadable, or you are unsure — return null. NEVER guess a set name.
-- Japanese-language cards: always return null for setName — do not guess an English equivalent.
+SET NAME — CRITICAL: Read the SPECIFIC set name from the small text at the very bottom of the card.
+Known English set names (return these exactly): Scarlet & Violet, Paldea Evolved, Obsidian Flames, 151, Paradox Rift, Paldean Fates, Temporal Forces, Twilight Masquerade, Shrouded Fable, Stellar Crown, Surging Sparks, Prismatic Evolutions, Destined Rivals, Brilliant Stars, Astral Radiance, Lost Origin, Silver Tempest, Crown Zenith, Evolving Skies, Fusion Strike, Chilling Reign, Battle Styles, Rebel Clash, Vivid Voltage, Darkness Ablaze.
+- Do NOT return a series name like "Scarlet & Violet Series" — return the exact product name.
+- If Japanese, unreadable, or uncertain → return null. NEVER guess.
 
 FINISH — Identify in this exact priority order:
 
-STEP 0 — PROMO CHECK (always first, overrides everything else):
-Look carefully at the card number area (bottom of card) and bottom corners for a "PROMO" stamp, a black star with "PROMO" text, or a code like "SVP EN 113" or "SWSH-EN043". Promo cards CAN have full-bleed edge-to-edge artwork — do NOT assume edge-to-edge art means SIR. If you see any promo marking → finish = Promo, regardless of artwork style.
+STEP 0 — PROMO CHECK (always first):
+Look at the card number zone (bottom-right) and bottom-left corner of the artwork for:
+- A black star with "PROMO" text printed on it
+- A standalone code without "/" like "SVP EN 113", "SWSH052", "SM229"
+- A WINNER, STAFF, or event stamp
+Promo cards CAN have full-bleed edge-to-edge artwork identical to SIR — artwork style does NOT determine this. If ANY promo marking exists → finish = Promo. Return cardNumber as the promo code exactly.
 
-STEP 1 — NUMBER CHECK:
-- If card number X/Y where X ÷ Y > 0.80 (e.g. 191/197 = 97%) → card is in premium zone, cannot be Normal/Holo/Reverse Holo
-- If X > Y entirely (e.g. 215/197) → definitely Secret/Special Rare
+STEP 1 — NUMBER ZONE CHECK (X/Y format only):
+- X > Y (e.g. 215/197, number exceeds set total) → card is in secret zone. Cannot be Normal, Holo Rare, Reverse Holo, Common, or Uncommon.
+- X < Y but X/Y > 80% (e.g. 166/197 = 84%) → card is in upper set zone. Can be Illustration Rare, Ultra Rare, or Double Rare.
+- X/Y ≤ 80% → standard zone. Can be any non-secret rarity.
+- SIR cards are ALWAYS in the secret zone (X > Y). A card numbered within the set total (X < Y) cannot be a SIR.
 
-STEP 2 — VISUAL IDENTIFICATION (only if no promo stamp found):
-★ Special Illustration Rare (SIR): The illustration covers the ENTIRE card face from edge to edge. You CANNOT see a rectangular border around the artwork. The Pokémon name appears as small white/metallic text floating directly over the illustration. The card background bleeds to all four edges. Attack/ability boxes appear as translucent overlays on the art. Dark cosmic, galaxy, nature scenes with no card frame = SIR. ONLY call SIR if you confirmed NO promo stamp in Step 0.
-★ Illustration Rare (IR): Art extends significantly beyond the standard art box but the card name area at the TOP still has partial standard frame elements. The overall layout is "partially standard, partially extended art."
-★ Hyper Rare: Entire card including text has rainbow gradient shimmer. Standard card frame still visible underneath the rainbow effect.
-★ Gold Secret Rare: Gold-colored card border, number exceeds set total, metallic gold text.
-★ Holo Rare: Standard rectangular art box is CLEARLY VISIBLE. Holofoil pattern appears ONLY inside the artwork rectangle. Card name, HP bar, and all text areas are in the standard non-holo layout. The border of the art box is always visible.
-★ Reverse Holo: Standard card layout with a holofoil shimmer on the CARD BORDER and TEXT AREAS, but the artwork itself is flat/non-holo.
-★ Normal / Common / Uncommon: No holofoil anywhere on the card.
-★ Amazing Rare (AR): SWSH era only (Sword & Shield sets: Vivid Voltage, Fusion Strike, Brilliant Stars etc.). Rainbow/prismatic swirl fills the artwork area, NOT covering the text/HP areas. The card has a standard frame — art box border is visible. Different from Hyper Rare where the rainbow covers the entire card including text.
-★ Promo: See Step 0 — promo stamp must be visible. Do NOT call Promo without a visible stamp.
+STEP 2 — VISUAL IDENTIFICATION (use rarity symbol + artwork to confirm):
+★★★ gold = Hyper Rare: Entire card is gold metallic including borders, text boxes, and artwork area.
+★★ gold = Special Illustration Rare (SIR): Full-bleed edge-to-edge artwork, NO visible art box border, Pokémon name floats as small text over illustration, always an ex-Pokémon, always numbered ABOVE set total (X > Y). Heavy etched ridged texture you can feel.
+★★ silver = Ultra Rare: Full Art ex card or Trainer Full Art. Extended artwork but still has a visible card frame. Numbered WITHIN set total.
+★ gold = Illustration Rare (IR): Artwork extends significantly beyond art box. Card name/HP area at the TOP retains partial standard frame. Always a non-ex Pokémon. Numbered WITHIN set total.
+★★ black = Double Rare: Standard ex card layout with visible art box. Numbered in lower half of set.
+★ black = Rare (Holo): Standard rectangular art box CLEARLY VISIBLE. Holofoil only inside art rectangle.
+◇ = Reverse Holo: Standard layout, holofoil on BORDERS and TEXT areas, artwork is flat.
+● / ◆ = Normal / Common / Uncommon: No holofoil anywhere.
+★ Amazing Rare (AR): SWSH era only. Rainbow/prismatic swirl in art box, standard frame visible.
+★ Promo: See Step 0. Requires visible promo stamp or code.
 
-CRITICAL DISTINCTION — SIR vs Promo vs Holo Rare:
-- Holo Rare ALWAYS has a visible rectangular border around the artwork. You can see where the art box starts and ends.
-- SIR NEVER has an art box border — but ALSO has NO promo stamp. Check for promo stamp before calling SIR.
-- Promo can look identical to SIR in artwork style but will have a promo stamp/code somewhere on the card.
-- A card cannot be Holo Rare if its number is above 80% of the set total.
+CRITICAL RULES:
+- SIR requires ALL of: edge-to-edge art + no art box + ex Pokémon + number above set total + no promo stamp
+- IR requires: extended art + partial top frame + non-ex Pokémon + number within set total
+- A card with number WITHIN the set total (X < Y) cannot be SIR
+- Promo cards can look exactly like SIR — the promo stamp/code is the only difference
 
 The card is assumed Near Mint — estimate market value at NM prices.
 
@@ -704,9 +770,9 @@ ABILITY & ATTACKS — Read these from the card body text (large, clear font — 
 Return ONLY valid JSON, no markdown, no extra text:
 {
   "cardName": "<name exactly as printed on card>",
-  "cardNumber": "<number e.g. 045/165 — null only if unreadable in BOTH images>",
-  "setName": "<specific set name from copyright line e.g. Obsidian Flames, Paradox Rift, Paldean Fates — null if unreadable, NEVER a description of why it is unreadable>",
-  "finish": "<one of: Normal | Holo Rare | Reverse Holo | Full Art | Secret Rare | Hyper Rare | Special Illustration Rare | Illustration Rare | Gold Secret Rare | Amazing Rare | Shiny Rare | Radiant Rare | Prism Star | 1st Edition | Shadowless | Promo — REQUIRED, never null for Pokémon>",
+  "cardNumber": "<standard cards: X/Y format e.g. 045/165 | promo cards: full code e.g. SVP EN 113 | null only if unreadable>",
+  "setName": "<exact set name e.g. Twilight Masquerade, Surging Sparks — null if unreadable or Japanese>",
+  "finish": "<Normal | Holo Rare | Reverse Holo | Double Rare | Ultra Rare | Illustration Rare | Special Illustration Rare | Hyper Rare | Secret Rare | Gold Secret Rare | Amazing Rare | Shiny Rare | Radiant Rare | Prism Star | 1st Edition | Shadowless | Promo — REQUIRED, never null for Pokémon>",
   "ability": "<ability name exactly as printed e.g. Distorted Future — null if card has no Ability>",
   "attacks": ["<attack 1 name>", "<attack 2 name>"],
   "hp": "<HP number only e.g. 150 — null if not a Pokémon>",
