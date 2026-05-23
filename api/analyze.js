@@ -336,13 +336,19 @@ export default async function handler(req) {
               debugInfo.ptcgQ = `name+setId`
             }
 
-            // Pass 3: name only — get top 10 newest, then pick by rarity/number
+            // Pass 3: promo sets (Promo finish or "Promo" in set name)
+            if (!candidates.length && parsedFinish === 'Promo') {
+              candidates = await queryPtcg(`name:"${cardName}" supertype:Pokémon`)
+              debugInfo.ptcgQ = `promo`
+            }
+
+            // Pass 4: name only — top 10 newest, pick by rarity/number
             if (!candidates.length) {
               candidates = await queryPtcg(`name:"${cardName}"`)
               debugInfo.ptcgQ = `name-only`
             }
 
-            // Pass 4: partial name (no quotes) — catches "Gothitelle ex", name-only promos
+            // Pass 5: partial name (no quotes) — catches "Gothitelle ex", promos
             if (!candidates.length) {
               candidates = await queryPtcg(`name:${cardName.replace(/["\s]/g, '*')}`)
               debugInfo.ptcgQ = `name-partial`
