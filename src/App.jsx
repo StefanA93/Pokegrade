@@ -581,6 +581,26 @@ function ScanScreen({ user, profile, onScanDone }) {
     setResult(null)
   }
 
+  function cropCardNumberArea(dataUrl) {
+    return new Promise(resolve => {
+      const img = new Image()
+      img.onload = () => {
+        const cropHeight = Math.floor(img.height * 0.22)
+        const cropY = img.height - cropHeight
+        const canvas = document.createElement('canvas')
+        canvas.width = img.width * 3
+        canvas.height = cropHeight * 3
+        const ctx = canvas.getContext('2d')
+        ctx.imageSmoothingEnabled = true
+        ctx.imageSmoothingQuality = 'high'
+        ctx.drawImage(img, 0, cropY, img.width, cropHeight, 0, 0, canvas.width, canvas.height)
+        resolve(canvas.toDataURL('image/jpeg', 0.95))
+      }
+      img.onerror = () => resolve(null)
+      img.src = dataUrl
+    })
+  }
+
   async function analyze() {
     if (!frontImg) { setError('Upload the front of the card first'); return }
     setLoading(true); setError('')
@@ -588,10 +608,11 @@ function ScanScreen({ user, profile, onScanDone }) {
       const { data: { session } } = await supabase.auth.getSession()
       const token = session?.access_token
       if (!token) { setError('Not signed in — please reload the app'); setLoading(false); return }
+      const numberImage = await cropCardNumberArea(frontImg)
       const res = await fetch('/api/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ frontImage: frontImg, backImage: backImg, game })
+        body: JSON.stringify({ frontImage: frontImg, backImage: backImg, numberImage, game })
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Analysis failed')

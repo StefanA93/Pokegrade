@@ -89,7 +89,7 @@ export default async function handler(req) {
 
   const VALID_GAMES = ['pokemon', 'mtg', 'yugioh', 'onepiece', 'dragonball', 'lorcana']
   const game = VALID_GAMES.includes(body.game) ? body.game : 'pokemon'
-  const { frontImage, backImage } = body
+  const { frontImage, backImage, numberImage } = body
 
   const MAX_IMAGE_BYTES = 5 * 1024 * 1024
   function isValidImage(dataUrl) {
@@ -106,16 +106,18 @@ export default async function handler(req) {
   }
 
   const prompt = buildPrompt(game, !!backImage)
-  const messages = [
-    {
-      role: 'user',
-      content: [
-        { type: 'text', text: prompt },
-        { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: frontImage.replace(/^data:image\/\w+;base64,/, '') } },
-        ...(backImage ? [{ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: backImage.replace(/^data:image\/\w+;base64,/, '') } }] : [])
-      ]
-    }
+  const messageContent = [
+    { type: 'text', text: prompt },
+    { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: frontImage.replace(/^data:image\/\w+;base64,/, '') } },
   ]
+  if (numberImage && isValidImage(numberImage)) {
+    messageContent.push({ type: 'text', text: 'ENLARGED card number area (bottom of card) — read the card number from this zoomed image:' })
+    messageContent.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: numberImage.replace(/^data:image\/\w+;base64,/, '') } })
+  }
+  if (backImage) {
+    messageContent.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: backImage.replace(/^data:image\/\w+;base64,/, '') } })
+  }
+  const messages = [{ role: 'user', content: messageContent }]
 
   let anthropicRes
   try {
@@ -127,7 +129,7 @@ export default async function handler(req) {
         'content-type': 'application/json'
       },
       body: JSON.stringify({
-        model: 'claude-haiku-4-5',
+        model: 'claude-sonnet-4-5',
         max_tokens: 1024,
         messages
       })
@@ -243,7 +245,7 @@ export default async function handler(req) {
           'Normal':                    'rarity:"Common"',
           'Reverse Holo':              'rarity:"Common" OR rarity:"Uncommon" OR rarity:"Rare"',
         }
-        const parsedFinish = parsedJson.finish || null
+        const parsedFinish = parsed.finish || null
         const rarityQuery = finishRarityQuery[parsedFinish] || null
 
         // Strategy 0 (Pokémon only): query pokemontcg.io directly — most reliable
@@ -315,8 +317,7 @@ export default async function handler(req) {
           }
         }
 
-        const parsedJson = JSON.parse(raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1))
-        const finish = parsedJson.finish || null
+        const finish = parsed.finish || null
         const rarity = finishToRarity(finish)
         const rarityFilter = rarity ? `&rarity=ilike.${encodeURIComponent(`*${rarity}*`)}` : ''
 
