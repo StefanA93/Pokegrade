@@ -3,7 +3,7 @@ export const config = { runtime: 'edge' }
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY
 const SUPABASE_URL = process.env.SUPABASE_URL
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY
-const PTCG_API_KEY = process.env.PTCG_API_KEY
+const PTCG_API_KEY = process.env.PTCG_API_KEY || process.env.TCG_API_KEY
 
 export default async function handler(req) {
   if (req.method === 'OPTIONS') {
@@ -315,7 +315,11 @@ export default async function handler(req) {
               const m = pool.find(c => c.rarity?.toLowerCase().includes(keyword))
               if (m) return m
             }
-            // 4. Newest English card (pool[0] since ordered by -releaseDate)
+            // 4. Newest English card — but NOT for premium finishes with a known number
+            // (returning wrong card is worse than returning null for SIR/Secret/IR etc.)
+            const isPremiumFinish = targetRarityStr &&
+              /special|illustration|hyper|secret|rainbow|ultra|shiny|amazing|radiant|prism/i.test(targetRarityStr)
+            if (targetNums?.length && isPremiumFinish) return null
             return pool[0]
           }
 
@@ -340,6 +344,19 @@ export default async function handler(req) {
             if (!candidates.length && parsedFinish === 'Promo') {
               candidates = await queryPtcg(`name:"${cardName}" supertype:Pokémon`)
               debugInfo.ptcgQ = `promo`
+            }
+
+            // Pass 3b: name + card number — finds SIRs/Secrets that may not appear in top-10 name-only
+            if (!candidates.length && cardNumber) {
+              const mainNum = cardNumber.split('/')[0].trim().replace(/^0+(?=\d)/, '')
+              candidates = await queryPtcg(`name:"${cardName}" number:${mainNum}`, 5)
+              debugInfo.ptcgQ = `name+number`
+            }
+
+            // Pass 3c: name + rarity — for premium finishes with wrong/missing number
+            if (!candidates.length && parsedFinish && finishRarityQuery[parsedFinish]) {
+              candidates = await queryPtcg(`name:"${cardName}" ${finishRarityQuery[parsedFinish]}`)
+              debugInfo.ptcgQ = `name+rarity`
             }
 
             // Pass 4: name only — top 10 newest, pick by rarity/number
