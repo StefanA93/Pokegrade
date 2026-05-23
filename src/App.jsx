@@ -873,6 +873,7 @@ function GradeResult({ result, game, frontImg, user, onSave }) {
             <div>AI name: <b style={{ color: '#fff' }}>{result.cardName || '—'}</b></div>
             <div>AI number: <b style={{ color: '#fff' }}>{result.cardNumber || '—'}</b></div>
             <div>AI set: <b style={{ color: '#fff' }}>{result.setName || '—'}</b></div>
+            <div>AI finish: <b style={{ color: '#fff' }}>{result.finish || '—'}</b></div>
             <div>Catalog hit: <b style={{ color: result._debug.catalogHit ? COLORS.success : COLORS.danger }}>{result._debug.catalogHit ? 'YES ✓' : 'NO ✗'}</b></div>
             <div>Source: <b style={{ color: '#fff' }}>{result._debug.source || 'catalog'}</b></div>
             <div>Catalog ID: <b style={{ color: '#fff' }}>{result.catalogId || '—'}</b></div>

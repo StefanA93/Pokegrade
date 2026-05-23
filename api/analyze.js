@@ -248,8 +248,8 @@ export default async function handler(req) {
 
         // Strategy 0 (Pokémon only): query pokemontcg.io directly — most reliable
         if (game === 'pokemon' && cardName) {
-          const tryPtcg = async (q) => {
-            const r = await fetch(`https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(q)}&pageSize=1&select=id,images,cardmarket`)
+          const tryPtcg = async (q, orderBy = '-set.releaseDate') => {
+            const r = await fetch(`https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(q)}&orderBy=${orderBy}&pageSize=1&select=id,images,cardmarket,set`)
             if (!r.ok) return null
             const d = await r.json()
             return d.data?.[0] || null
@@ -273,6 +273,10 @@ export default async function handler(req) {
             // 0d: name + set name
             if (!hit && setName) {
               hit = await tryPtcg(`name:"${cardName}" set.name:"${setName}"`)
+            }
+            // 0e: name only — newest card (avoids falling back to 1999-era cards)
+            if (!hit) {
+              hit = await tryPtcg(`name:"${cardName}"`)
             }
 
             if (hit) {
