@@ -579,6 +579,19 @@ export default async function handler(req) {
           }
         }
 
+        // Strategy Promo: when finish is Promo, search directly in promo sets (svp*, swshp*, etc.)
+        // Runs before all other strategies — promo cards have unique set_ids separate from base sets
+        if (!catalogId && parsedFinish === 'Promo' && game === 'pokemon') {
+          const promoSetFilters = ['svp', 'swshp', 'smp', 'xyp', 'bwp']
+          for (const promoSet of promoSetFilters) {
+            if (catalogId) break
+            const rows = await tryFetch(
+              `${SUPABASE_URL}/rest/v1/card_catalog?${gameFilter}&${nameFilter}&set_id=like.${promoSet}*&select=${fields}&order=id.desc&limit=5`
+            )
+            if (rows[0]) applyHit(rows[0], `promo-${promoSet}`)
+          }
+        }
+
         // Strategy 1: number + set name in catalog (URL-safe: encode & as %26)
         if (!catalogId && nums.length && setName) {
           for (const num of nums) {
