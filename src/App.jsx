@@ -768,10 +768,15 @@ function ScanScreen({ user, profile, onScanDone, modelState, modelProgress }) {
               </>
             ) : (
               <>
-                {[{top:6,left:6}, {top:6,right:6}, {bottom:6,left:6}, {bottom:6,right:6}].map((pos, i) => (
-                  <div key={i} style={{ position: 'absolute', width: 14, height: 14, ...pos, pointerEvents: 'none' }}>
-                    <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: 2, background: `${COLORS.gold}66` }} />
-                    <div style={{ position: 'absolute', top: 0, left: 0, width: 2, height: '100%', background: `${COLORS.gold}66` }} />
+                {[
+                  { outer: {top:6,left:6},     inner: {top:0,left:0} },
+                  { outer: {top:6,right:6},    inner: {top:0,right:0} },
+                  { outer: {bottom:6,left:6},  inner: {bottom:0,left:0} },
+                  { outer: {bottom:6,right:6}, inner: {bottom:0,right:0} },
+                ].map(({ outer, inner }, i) => (
+                  <div key={i} style={{ position: 'absolute', width: 14, height: 14, ...outer, pointerEvents: 'none' }}>
+                    <div style={{ position: 'absolute', width: '100%', height: 2, background: `${COLORS.gold}88`, ...inner }} />
+                    <div style={{ position: 'absolute', width: 2, height: '100%', background: `${COLORS.gold}88`, ...inner }} />
                   </div>
                 ))}
                 <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={COLORS.muted} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
