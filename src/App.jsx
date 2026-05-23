@@ -660,6 +660,7 @@ function ScanScreen({ user, profile, onScanDone, modelState, modelProgress }) {
   const [error, setError] = useState('')
   const [result, setResult] = useState(null)
   const [camera, setCamera] = useState(null) // 'front' | 'back' | null
+  const [logoErrs, setLogoErrs] = useState({})
   const frontRef = useRef()
   const backRef = useRef()
 
@@ -795,25 +796,47 @@ function ScanScreen({ user, profile, onScanDone, modelState, modelProgress }) {
 
       {/* Game selector */}
       <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 4, marginBottom: 20, scrollbarWidth: 'none' }}>
-        {GAMES.map(g => (
-          <button key={g.id} onClick={() => setGame(g.id)} style={{
-            flexShrink: 0,
-            padding: '10px 12px 9px',
-            borderRadius: 14,
-            background: game === g.id ? g.color + '18' : COLORS.card,
-            border: `1.5px solid ${game === g.id ? g.color : COLORS.border}`,
-            color: game === g.id ? g.color : COLORS.muted,
-            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5,
-            minWidth: 62,
-            boxShadow: game === g.id ? `0 0 14px ${g.color}28` : 'none',
-            transition: 'all .15s',
-          }}>
-            {g.logo}
-            <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.2, whiteSpace: 'nowrap' }}>
-              {g.label}
-            </span>
-          </button>
-        ))}
+        {GAMES.map(g => {
+          const active = game === g.id
+          return (
+            <button key={g.id} onClick={() => setGame(g.id)} style={{
+              flexShrink: 0,
+              padding: '10px 12px 9px',
+              borderRadius: 14,
+              background: active ? g.color + '18' : COLORS.card,
+              border: `1.5px solid ${active ? g.color : COLORS.border}`,
+              color: active ? g.color : COLORS.muted,
+              display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
+              minWidth: 66,
+              boxShadow: active ? `0 0 14px ${g.color}28` : 'none',
+              transition: 'all .15s',
+            }}>
+              <div style={{ height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                {!logoErrs[g.id] ? (
+                  <img
+                    src={GAME_LOGOS[g.id]}
+                    alt={g.label}
+                    onError={() => setLogoErrs(e => ({ ...e, [g.id]: true }))}
+                    style={{
+                      height: 32, width: 'auto', maxWidth: 58,
+                      objectFit: 'contain',
+                      opacity: active ? 1 : 0.45,
+                      filter: active ? 'none' : 'grayscale(30%)',
+                      transition: 'opacity .15s, filter .15s',
+                    }}
+                  />
+                ) : (
+                  <div style={{ color: active ? g.color : COLORS.muted }}>
+                    {React.cloneElement(g.logo, { width: 28, height: 28 })}
+                  </div>
+                )}
+              </div>
+              <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.2, whiteSpace: 'nowrap' }}>
+                {g.label}
+              </span>
+            </button>
+          )
+        })}
       </div>
 
       {/* Image upload */}
