@@ -282,17 +282,21 @@ export default async function handler(req) {
                 hit = await tryPtcg(`number:${num} set.name:"${setName}"`)
               }
             }
-            // 0d: name + rarity (when number unreadable) — prevents falling back to oldest card
+            // 0d: name + rarity (when number unreadable) — most reliable for SIR/IR/Hyper
             if (!hit && rarityQuery) {
               hit = await tryPtcg(`name:"${cardName}" ${rarityQuery}`)
             }
-            // 0e: name + set name
+            // 0e: name + set name (exact)
             if (!hit && setName) {
               hit = await tryPtcg(`name:"${cardName}" set.name:"${setName}"`)
             }
-            // 0f: name only — newest card (avoids falling back to 1999-era cards)
+            // 0f: name only (exact) — newest first
             if (!hit) {
               hit = await tryPtcg(`name:"${cardName}"`)
+            }
+            // 0g: name partial match (no quotes) — catches alternate prints, ex/V suffixes
+            if (!hit) {
+              hit = await tryPtcg(`name:${encodeURIComponent(cardName).replace(/%22/g, '')}`)
             }
 
             if (hit) {
@@ -303,7 +307,9 @@ export default async function handler(req) {
               debugInfo.catalogHit = true
               debugInfo.source = 'ptcg'
             }
-          } catch (_) {}
+          } catch (ptcgErr) {
+            debugInfo.ptcgError = ptcgErr.message
+          }
         }
 
         // Strategy 1: number + set name in catalog (URL-safe: encode & as %26)
@@ -418,24 +424,26 @@ function buildPrompt(game, hasBack) {
 
   return `You are an expert ${gameName} card identifier. Analyze ${hasBack ? 'these two images (front and back)' : 'this card image'} and identify the card with maximum precision.
 
-CARD NUMBER — CRITICAL: Look at the very bottom corner for a number like "045/165" or "215/197". Secret/Special Rares have numbers ABOVE set total (e.g. "215/197"). Read exactly as printed.
+CARD NUMBER — CRITICAL: The second image is an enlarged crop of the bottom of the card — use it to read the number (e.g. "045/165" or "215/197"). Secret/Special Rares have numbers ABOVE set total. Return null ONLY if completely unreadable even in the enlarged view.
 
-FINISH — identify from visual appearance:
-- Full painted illustration covering the entire card face = Special Illustration Rare or Illustration Rare
-- Art extends to card edges with rainbow/gold border = Hyper Rare or Full Art
-- Regular frame with shiny holofoil pattern in artwork area = Holo Rare
-- Regular frame with shiny foil on non-art areas only = Reverse Holo
-- Regular frame, no foil at all = Normal
-- Number higher than set total = Secret Rare or higher rarity
+SET NAME — CRITICAL: Read the SPECIFIC set name from the copyright line at the very bottom of the card (e.g. "Obsidian Flames", "Paradox Rift", "Paldean Fates", "Temporal Forces"). Do NOT return a series name like "Scarlet & Violet" — return the exact product name printed on the card.
+
+FINISH — MUST always be identified from visual appearance (never return null for Pokémon):
+- Full painted illustration bleeding to card edges, no standard frame = Special Illustration Rare or Illustration Rare
+- Art extends to all edges with rainbow shimmer or gold border = Hyper Rare or Full Art
+- Standard card frame with holofoil pattern in artwork area = Holo Rare
+- Standard frame with foil on non-art areas only = Reverse Holo
+- Standard frame, no foil anywhere = Normal
+- Number clearly exceeds set total = Secret Rare or higher
 
 The card is assumed Near Mint — estimate market value at NM prices.
 
 Return ONLY valid JSON, no markdown, no extra text:
 {
   "cardName": "<name exactly as printed on card>",
-  "cardNumber": "<number at bottom e.g. 045/165 — null only if truly unreadable>",
-  "setName": "<set name from copyright line e.g. Paldean Fates, Obsidian Flames, Scarlet & Violet>",
-  "finish": "<one of: Normal | Holo Rare | Reverse Holo | Full Art | Secret Rare | Hyper Rare | Special Illustration Rare | Illustration Rare | Gold Secret Rare | Amazing Rare | Shiny Rare | Radiant Rare | Prism Star | 1st Edition | Shadowless | Promo | null>",
+  "cardNumber": "<number e.g. 045/165 — null only if unreadable in BOTH images>",
+  "setName": "<specific set name e.g. Obsidian Flames, Paradox Rift, Paldean Fates — NOT a series name>",
+  "finish": "<one of: Normal | Holo Rare | Reverse Holo | Full Art | Secret Rare | Hyper Rare | Special Illustration Rare | Illustration Rare | Gold Secret Rare | Amazing Rare | Shiny Rare | Radiant Rare | Prism Star | 1st Edition | Shadowless | Promo — REQUIRED, never null for Pokémon>",
   "confidence": "<High|Mid|Low>",
   "centering": "<centering description>",
   "corners": "<corners description>",

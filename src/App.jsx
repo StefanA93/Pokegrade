@@ -898,7 +898,8 @@ function GradeResult({ result, game, frontImg, user, onSave }) {
             <div>Catalog hit: <b style={{ color: result._debug.catalogHit ? COLORS.success : COLORS.danger }}>{result._debug.catalogHit ? 'YES ✓' : 'NO ✗'}</b></div>
             <div>Strategy: <b style={{ color: '#fff' }}>{result._debug.source || '—'}</b></div>
             <div>Catalog ID: <b style={{ color: result._debug.catalogHit && !result.catalogId?.startsWith('neo') ? COLORS.success : '#fff' }}>{result.catalogId || '—'}</b></div>
-            {result._debug.error && <div style={{ color: COLORS.danger }}>Error: {result._debug.error}</div>}
+            {result._debug.error && <div style={{ color: COLORS.danger }}>Err: {result._debug.error}</div>}
+            {result._debug.ptcgError && <div style={{ color: '#e67e22' }}>ptcg err: {result._debug.ptcgError}</div>}
           </div>
         )}
 
