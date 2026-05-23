@@ -340,7 +340,8 @@ export default async function handler(req) {
               const sid = c.set?.id || ''
               return !sid.startsWith('rsv') && !sid.startsWith('svsv') && c.set?.series !== 'Japanese'
             })
-            let pool = englishCards.length ? englishCards : cards
+            if (!englishCards.length) return null
+            let pool = englishCards
 
             if (setEra && ERA_TO_SET_PREFIX[setEra] && pool.length > 1) {
               const eraMatch = pool.filter(c => (c.set?.id || '').startsWith(ERA_TO_SET_PREFIX[setEra]))
