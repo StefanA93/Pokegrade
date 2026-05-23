@@ -65,6 +65,28 @@ function getPsaConditionColor(grade) {
   return COLORS.danger
 }
 
+function computePsaGrade(centering, corners, edges, surface) {
+  const map = text => {
+    if (!text) return null
+    const t = text.toLowerCase()
+    if (t.includes('perfect') || (t.includes('no ') && t.includes('issue'))) return 10
+    if (t.includes('minimal') || t.includes('slight') || t.includes('minor')) return 7.5
+    if (t.includes('moderate') || t.includes('some') || t.includes('visible')) return 5
+    if (t.includes('heavy') || t.includes('severe') || t.includes('significant')) return 3
+    return null
+  }
+  const scores = [centering, corners, edges, surface].map(map).filter(s => s !== null)
+  if (!scores.length) return null
+  const avg = scores.reduce((a, b) => a + b, 0) / scores.length
+  if (avg >= 9.5) return { grade: 10, label: 'Gem Mint' }
+  if (avg >= 8) return { grade: 9, label: 'Mint' }
+  if (avg >= 7) return { grade: 8, label: 'Near Mint-Mint' }
+  if (avg >= 6) return { grade: 7, label: 'Near Mint' }
+  if (avg >= 4.5) return { grade: 6, label: 'Excellent-Mint' }
+  if (avg >= 3.5) return { grade: 5, label: 'Excellent' }
+  return { grade: 4, label: 'Very Good-Excellent' }
+}
+
 // ─── Logo Component ───────────────────────────────────────────────────────────
 function GradeDexLogo({ size = 'md' }) {
   const s = size === 'lg' ? 1.4 : size === 'sm' ? 0.7 : 1
@@ -679,7 +701,10 @@ function ScanScreen({ user, profile, onScanDone, modelState, modelProgress }) {
       <input ref={backRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={e => handleFile(e, 'back')} />
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, paddingTop: 8 }}>
-        <h2 style={{ fontWeight: 900, fontSize: 22 }}>AI Card Analysis</h2>
+        <div>
+          <h2 style={{ fontWeight: 900, fontSize: 20, letterSpacing: -0.3 }}>Scan Card</h2>
+          <div style={{ fontSize: 11, color: COLORS.muted, fontWeight: 500, marginTop: 1 }}>AI-powered grading analysis</div>
+        </div>
         <Badge color={profile?.is_pro ? COLORS.gold : COLORS.muted}>{profile?.is_pro ? 'PRO' : scansLeft}</Badge>
       </div>
 
@@ -702,16 +727,31 @@ function ScanScreen({ user, profile, onScanDone, modelState, modelProgress }) {
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
         {[{ label: 'Front', key: 'front', img: frontImg }, { label: 'Back (optional)', key: 'back', img: backImg }].map(({ label, key, img }) => (
           <button key={key} onClick={() => pickImage(key)} style={{
-            aspectRatio: '3/4', borderRadius: 16, border: `2px dashed ${img ? COLORS.gold : COLORS.border}`,
-            background: COLORS.card, overflow: 'hidden', position: 'relative',
+            aspectRatio: '3/4', borderRadius: 16,
+            border: img ? `1.5px solid ${COLORS.gold}60` : `1.5px solid ${COLORS.border}`,
+            background: img ? 'transparent' : `linear-gradient(145deg, ${COLORS.card}, #090910)`,
+            boxShadow: img ? `0 0 16px ${COLORS.gold}18` : 'none',
+            overflow: 'hidden', position: 'relative',
             display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 8,
           }}>
             {img ? (
-              <img src={img} alt={label} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              <>
+                <img src={img} alt={label} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                <div style={{ position: 'absolute', bottom: 8, right: 8, background: COLORS.success, borderRadius: '50%', width: 20, height: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, boxShadow: '0 2px 8px rgba(0,0,0,0.4)' }}>✓</div>
+              </>
             ) : (
               <>
-                <span style={{ fontSize: 32 }}>📷</span>
-                <span style={{ color: COLORS.muted, fontSize: 12, fontWeight: 600 }}>{label}</span>
+                {[{top:6,left:6}, {top:6,right:6}, {bottom:6,left:6}, {bottom:6,right:6}].map((pos, i) => (
+                  <div key={i} style={{ position: 'absolute', width: 14, height: 14, ...pos, pointerEvents: 'none' }}>
+                    <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: 2, background: `${COLORS.gold}66` }} />
+                    <div style={{ position: 'absolute', top: 0, left: 0, width: 2, height: '100%', background: `${COLORS.gold}66` }} />
+                  </div>
+                ))}
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={COLORS.muted} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+                  <circle cx="12" cy="13" r="4"/>
+                </svg>
+                <span style={{ color: COLORS.muted, fontSize: 11, fontWeight: 600, letterSpacing: 0.3 }}>{label}</span>
               </>
             )}
           </button>
@@ -726,16 +766,22 @@ function ScanScreen({ user, profile, onScanDone, modelState, modelProgress }) {
 
       {/* Vision model status */}
       {modelState === 'loading' && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0', justifyContent: 'center' }}>
-          <Spinner size={12} color={COLORS.muted} />
-          <span style={{ fontSize: 11, color: COLORS.muted }}>
-            Loading vision model{modelProgress > 0 ? ` ${modelProgress}%` : '…'}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, padding: '8px 14px', borderRadius: 20, background: `${COLORS.card}`, border: `1px solid ${COLORS.border}`, justifyContent: 'center' }}>
+          <Spinner size={11} color={COLORS.gold} />
+          <span style={{ fontSize: 11, color: COLORS.muted, fontWeight: 600 }}>
+            Loading vision model{modelProgress > 0 ? ` · ${modelProgress}%` : '…'}
           </span>
+          {modelProgress > 0 && (
+            <div style={{ width: 48, height: 3, borderRadius: 2, background: COLORS.border, overflow: 'hidden', flexShrink: 0 }}>
+              <div style={{ height: '100%', width: `${modelProgress}%`, background: `linear-gradient(90deg, ${COLORS.gold}88, ${COLORS.gold})`, borderRadius: 2, transition: 'width .3s ease' }} />
+            </div>
+          )}
         </div>
       )}
       {modelState === 'ready' && (
-        <div style={{ textAlign: 'center', fontSize: 11, color: COLORS.success, padding: '4px 0' }}>
-          ✦ Vision model ready — embedding search active
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 10, padding: '7px 14px', borderRadius: 20, background: `${COLORS.success}10`, border: `1px solid ${COLORS.success}25` }}>
+          <span style={{ color: COLORS.success, fontSize: 12 }}>✦</span>
+          <span style={{ fontSize: 11, fontWeight: 700, color: COLORS.success, letterSpacing: 0.3 }}>Vision model ready</span>
         </div>
       )}
 
@@ -750,6 +796,7 @@ function GradeResult({ result, game, frontImg, user, onSave }) {
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [saveError, setSaveError] = useState('')
+  const psaGrade = computePsaGrade(result.centering, result.corners, result.edges, result.surface)
 
   async function save() {
     setSaving(true)
@@ -829,6 +876,24 @@ function GradeResult({ result, game, frontImg, user, onSave }) {
 
   return (
     <Card style={{ marginTop: 20, padding: 0, overflow: 'hidden' }} className="slideUp">
+      {result._debug?.embeddingMatch && (
+        <div style={{
+          background: `linear-gradient(90deg, ${COLORS.success}15, ${COLORS.success}08)`,
+          borderBottom: `1px solid ${COLORS.success}25`,
+          padding: '8px 20px',
+          display: 'flex', alignItems: 'center', gap: 8,
+        }}>
+          <span style={{ color: COLORS.success, fontSize: 14 }}>✦</span>
+          <span style={{ fontSize: 11, fontWeight: 700, color: COLORS.success, letterSpacing: 0.5 }}>
+            Matched by Vision AI
+          </span>
+          {result._debug?.matchScore && (
+            <span style={{ fontSize: 10, color: `${COLORS.success}99`, marginLeft: 'auto' }}>
+              {Math.round(result._debug.matchScore * 100)}% confidence
+            </span>
+          )}
+        </div>
+      )}
       {/* Hero header med kort-billede og grade-cirkel side om side */}
       <div style={{ background: gradeBg, padding: '20px 20px 0', borderBottom: `1px solid ${COLORS.border}` }}>
         <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start', marginBottom: 20 }}>
@@ -869,13 +934,29 @@ function GradeResult({ result, game, frontImg, user, onSave }) {
               </div>
             )}
 
-            {/* Condition badge — Near Mint */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <div className="gradeReveal" style={{ fontSize: 32, fontWeight: 900, color: gradeColor, lineHeight: 1, letterSpacing: -0.5 }}>
-                Near Mint
+            {/* Condition badge — computed PSA grade */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{ position: 'relative', display: 'inline-block' }}>
+                <div style={{
+                  width: 72, height: 72, borderRadius: '50%',
+                  background: `radial-gradient(circle at 35% 30%, ${COLORS.gold}30, ${COLORS.gold}08)`,
+                  border: `2px solid ${COLORS.gold}55`,
+                  boxShadow: `0 0 24px ${COLORS.gold}30, inset 0 1px 0 ${COLORS.gold}40`,
+                  display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                  flexShrink: 0,
+                }}>
+                  <span style={{ fontSize: psaGrade ? 22 : 14, fontWeight: 900, color: COLORS.gold, lineHeight: 1, letterSpacing: -0.5 }} className="gradeReveal">
+                    {psaGrade ? 'PSA' : '—'}
+                  </span>
+                  <span style={{ fontSize: psaGrade ? 26 : 12, fontWeight: 900, color: '#fff', lineHeight: 1, letterSpacing: -1 }} className="gradeReveal">
+                    {psaGrade?.grade ?? '?'}
+                  </span>
+                </div>
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <div style={{ fontSize: 11, color: COLORS.muted, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 }}>PSA 7</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <div style={{ fontSize: 18, fontWeight: 800, color: gradeColor, lineHeight: 1, letterSpacing: -0.3 }}>
+                  {psaGrade?.label || result.confidence || 'Analyzing…'}
+                </div>
                 <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: confidenceColor + '22', border: `1px solid ${confidenceColor}44`, borderRadius: 6, padding: '2px 8px' }}>
                   <div style={{ width: 6, height: 6, borderRadius: '50%', background: confidenceColor }} />
                   <span style={{ fontSize: 11, fontWeight: 700, color: confidenceColor }}>{result.confidence} Confidence</span>
@@ -891,16 +972,25 @@ function GradeResult({ result, game, frontImg, user, onSave }) {
             const score = subGradeScore(value)
             const barColor = score >= 9 ? COLORS.success : score >= 6 ? COLORS.gold : score ? '#e67e22' : COLORS.border
             return (
-              <div key={label} style={{ background: COLORS.bg + 'cc', borderRadius: 10, padding: '10px 12px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                  <span style={{ fontSize: 10, color: COLORS.muted, textTransform: 'uppercase', letterSpacing: 0.6, fontWeight: 600 }}>{label}</span>
+              <div key={label} style={{ background: `${COLORS.bg}ee`, borderRadius: 10, padding: '10px 12px', border: `1px solid ${COLORS.border}` }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                  <span style={{ fontSize: 10, color: COLORS.muted, textTransform: 'uppercase', letterSpacing: 0.8, fontWeight: 700 }}>{label}</span>
+                  {score !== null && (
+                    <span style={{
+                      fontSize: 10, fontWeight: 800, color: barColor,
+                      background: `${barColor}18`, borderRadius: 4, padding: '2px 6px',
+                    }}>{score}/10</span>
+                  )}
                 </div>
                 {score !== null && (
-                  <div style={{ height: 3, background: COLORS.border, borderRadius: 2, marginBottom: 5 }}>
-                    <div style={{ height: '100%', width: `${score * 10}%`, background: barColor, borderRadius: 2, transition: 'width .6s ease' }} />
+                  <div style={{ height: 5, background: `${COLORS.border}`, borderRadius: 3, marginBottom: 6, overflow: 'hidden' }}>
+                    <div style={{
+                      height: '100%', width: `${score * 10}%`, background: `linear-gradient(90deg, ${barColor}cc, ${barColor})`,
+                      borderRadius: 3, transition: 'width .8s cubic-bezier(.34,1.1,.64,1)',
+                    }} />
                   </div>
                 )}
-                <div style={{ fontSize: 12, fontWeight: 600, color: COLORS.text, lineHeight: 1.3 }}>{value || '—'}</div>
+                <div style={{ fontSize: 11, fontWeight: 600, color: COLORS.text, lineHeight: 1.4 }}>{value || '—'}</div>
               </div>
             )
           })}
@@ -928,16 +1018,42 @@ function GradeResult({ result, game, frontImg, user, onSave }) {
         )}
 
         {/* Pris-sektion */}
-        <div style={{ background: COLORS.bg, borderRadius: 12, padding: 14 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-            <span style={{ fontSize: 12, color: COLORS.muted, textTransform: 'uppercase', letterSpacing: 0.6, fontWeight: 600 }}>Market Value</span>
-            <span style={{ fontSize: 24, fontWeight: 600, color: COLORS.gold, fontFamily: FONT_VALUE, letterSpacing: -0.3, fontVariantNumeric: 'tabular-nums' }}>{result.estimatedPSAValue}</span>
+        <div style={{ background: `linear-gradient(135deg, ${COLORS.bg}, #0a0a12)`, borderRadius: 14, padding: '14px 16px', border: `1px solid ${COLORS.border}` }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
+            <div>
+              <div style={{ fontSize: 10, color: COLORS.muted, textTransform: 'uppercase', letterSpacing: 1, fontWeight: 700, marginBottom: 4 }}>
+                {result.catalogPriceEur ? 'Cardmarket Price' : 'Estimated Value'}
+              </div>
+              <div style={{ fontSize: 28, fontWeight: 700, color: COLORS.gold, fontFamily: FONT_VALUE, letterSpacing: -0.5, lineHeight: 1 }}>
+                {result.catalogPriceEur
+                  ? new Intl.NumberFormat('da-DK', { style: 'currency', currency: 'EUR' }).format(result.catalogPriceEur)
+                  : (result.estimatedPSAValue || '—')
+                }
+              </div>
+            </div>
+            {result.catalogCardmarketUrl && (
+              <a href={result.catalogCardmarketUrl} target="_blank" rel="noreferrer" style={{
+                display: 'flex', alignItems: 'center', gap: 4,
+                background: `${COLORS.gold}15`, border: `1px solid ${COLORS.gold}35`,
+                borderRadius: 8, padding: '6px 10px', textDecoration: 'none',
+                color: COLORS.gold, fontSize: 11, fontWeight: 700, letterSpacing: 0.3,
+                flexShrink: 0,
+              }}>
+                Cardmarket ↗
+              </a>
+            )}
           </div>
-          <div style={{ height: 1, background: COLORS.border, marginBottom: 10 }} />
+          <div style={{ height: 1, background: `${COLORS.border}`, marginBottom: 10 }} />
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: 13, color: COLORS.muted }}>PSA Grading Fee</span>
-            <span style={{ fontSize: 14, fontWeight: 700, color: COLORS.text }}>{result.gradingFee}</span>
+            <span style={{ fontSize: 12, color: COLORS.muted }}>PSA Grading Fee</span>
+            <span style={{ fontSize: 13, fontWeight: 700, color: COLORS.text }}>{result.gradingFee || '~25€'}</span>
           </div>
+          {result.catalogPriceEur && result.estimatedPSAValue && (
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 6 }}>
+              <span style={{ fontSize: 12, color: COLORS.muted }}>PSA Value Estimate</span>
+              <span style={{ fontSize: 12, fontWeight: 600, color: `${COLORS.gold}cc` }}>{result.estimatedPSAValue}</span>
+            </div>
+          )}
         </div>
 
         {/* Anbefaling */}
@@ -976,7 +1092,7 @@ function GradeResult({ result, game, frontImg, user, onSave }) {
         {saveError && <p style={{ color: COLORS.danger, fontSize: 12, textAlign: 'center', marginBottom: 4 }}>{saveError}</p>}
         <div style={{ display: 'flex', gap: 10, paddingTop: 4 }}>
           <Btn onClick={save} disabled={saving || saved} small style={{ flex: 1 }}>
-            {saved ? 'Saved' : saving ? <Spinner size={16} color="#0a0a12" /> : 'Save to Collection'}
+            {saved ? '✓ Saved to Collection' : saving ? <Spinner size={16} color="#0a0a12" /> : 'Save to Collection'}
           </Btn>
           {navigator.share && (
             <button onClick={share} style={{ flexShrink: 0, width: 44, height: 44, borderRadius: 12, background: COLORS.card, border: `1.5px solid ${COLORS.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }} aria-label="Share analysis">
