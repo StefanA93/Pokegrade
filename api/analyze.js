@@ -423,7 +423,19 @@ export default async function handler(req) {
               if (candidates.length) debugInfo.ptcgQ = `attack:${attacks[0]}`
             }
 
-            // Pass 0c: HP — narrows to specific card version
+            // Pass 0c: card number — most precise variant identifier (SIRs, Secrets, promos)
+            // Runs before HP so a specific number like "139" always beats the weaker hp signal
+            if (!candidates.length && cardNumber) {
+              const rawNum = cardNumber.split('/')[0].trim()
+              const strippedNum = rawNum.replace(/^0+(?=\d)/, '')
+              candidates = await queryPtcg(`name:"${cardName}" number:${rawNum}`, 5)
+              if (!candidates.length && strippedNum !== rawNum) {
+                candidates = await queryPtcg(`name:"${cardName}" number:${strippedNum}`, 5)
+              }
+              if (candidates.length) debugInfo.ptcgQ = `name+number`
+            }
+
+            // Pass 0d: HP — narrows to specific card version when number lookup missed
             if (!candidates.length && hp) {
               candidates = await queryPtcg(`name:"${cardName}" hp:${hp}`)
               if (candidates.length) debugInfo.ptcgQ = `name+hp:${hp}`
@@ -445,18 +457,6 @@ export default async function handler(req) {
             if (!candidates.length && parsedFinish === 'Promo') {
               candidates = await queryPtcg(`name:"${cardName}" supertype:Pokémon`)
               debugInfo.ptcgQ = `promo`
-            }
-
-            // Pass 3b: name + card number — finds SIRs/Secrets that may not appear in top-10 name-only
-            // Try exact number as given (e.g. "072"), then stripped of leading zeros ("72")
-            if (!candidates.length && cardNumber) {
-              const rawNum = cardNumber.split('/')[0].trim()
-              const strippedNum = rawNum.replace(/^0+(?=\d)/, '')
-              candidates = await queryPtcg(`name:"${cardName}" number:${rawNum}`, 5)
-              if (!candidates.length && strippedNum !== rawNum) {
-                candidates = await queryPtcg(`name:"${cardName}" number:${strippedNum}`, 5)
-              }
-              debugInfo.ptcgQ = `name+number`
             }
 
             // Pass 3c: name + rarity — for premium finishes with wrong/missing number
