@@ -9,12 +9,70 @@ const supabase = createClient(
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 const GAMES = [
-  { id: 'pokemon',    label: 'Pokémon',        emoji: '⚡', color: '#FFCB05' },
-  { id: 'mtg',        label: 'Magic: TG',      emoji: '🔮', color: '#a29bfe' },
-  { id: 'yugioh',     label: 'Yu-Gi-Oh!',      emoji: '👁', color: '#fdcb6e' },
-  { id: 'onepiece',   label: 'One Piece',      emoji: '☠️', color: '#e17055' },
-  { id: 'dragonball', label: 'Dragon Ball',    emoji: '🐉', color: '#f39c12' },
-  { id: 'lorcana',    label: 'Lorcana',        emoji: '✨', color: '#74b9ff' },
+  {
+    id: 'pokemon', label: 'Pokémon', color: '#FFCB05',
+    logo: (
+      <svg viewBox="0 0 24 24" width="26" height="26" fill="none">
+        <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="1.5"/>
+        <path d="M2 12a10 10 0 0 1 20 0Z" fill="currentColor" fillOpacity="0.35"/>
+        <line x1="2" y1="12" x2="22" y2="12" stroke="currentColor" strokeWidth="1.5"/>
+        <circle cx="12" cy="12" r="3" fill="currentColor"/>
+        <circle cx="12" cy="12" r="1.4" fill="#06060a"/>
+      </svg>
+    ),
+  },
+  {
+    id: 'mtg', label: 'Magic', color: '#a29bfe',
+    logo: (
+      <svg viewBox="0 0 24 24" width="26" height="26" fill="none">
+        <polygon points="12,2 14.5,9 22,9 16,13.5 18.5,21 12,16.5 5.5,21 8,13.5 2,9 9.5,9"
+          fill="currentColor" fillOpacity="0.25" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round"/>
+      </svg>
+    ),
+  },
+  {
+    id: 'yugioh', label: 'Yu-Gi-Oh!', color: '#fdcb6e',
+    logo: (
+      <svg viewBox="0 0 24 24" width="26" height="26" fill="none">
+        <ellipse cx="12" cy="12" rx="10" ry="6" stroke="currentColor" strokeWidth="1.5"/>
+        <circle cx="12" cy="12" r="3.5" fill="currentColor" fillOpacity="0.3" stroke="currentColor" strokeWidth="1.5"/>
+        <circle cx="12" cy="12" r="1.6" fill="currentColor"/>
+      </svg>
+    ),
+  },
+  {
+    id: 'onepiece', label: 'One Piece', color: '#e17055',
+    logo: (
+      <svg viewBox="0 0 24 24" width="26" height="26" fill="none">
+        <circle cx="12" cy="9" r="6" fill="currentColor" fillOpacity="0.2" stroke="currentColor" strokeWidth="1.5"/>
+        <circle cx="9.5" cy="8.5" r="1.8" fill="currentColor"/>
+        <circle cx="14.5" cy="8.5" r="1.8" fill="currentColor"/>
+        <path d="M9 12h6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+        <path d="M5 15l-2 4M19 15l2 4" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+      </svg>
+    ),
+  },
+  {
+    id: 'dragonball', label: 'Dragon Ball', color: '#f39c12',
+    logo: (
+      <svg viewBox="0 0 24 24" width="26" height="26" fill="none">
+        <circle cx="12" cy="12" r="10" fill="currentColor" fillOpacity="0.2" stroke="currentColor" strokeWidth="1.5"/>
+        <circle cx="9"  cy="9"  r="1.8" fill="currentColor"/>
+        <circle cx="15" cy="9"  r="1.8" fill="currentColor"/>
+        <circle cx="12" cy="15" r="1.8" fill="currentColor"/>
+      </svg>
+    ),
+  },
+  {
+    id: 'lorcana', label: 'Lorcana', color: '#74b9ff',
+    logo: (
+      <svg viewBox="0 0 24 24" width="26" height="26" fill="none">
+        <path d="M12 3C9 7 4 12 4 16a8 8 0 0 0 16 0c0-4-5-9-8-13Z"
+          fill="currentColor" fillOpacity="0.25" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
+        <path d="M9.5 16.5a3.5 3.5 0 0 0 2.5 1.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" opacity="0.7"/>
+      </svg>
+    ),
+  },
 ]
 
 const STRIPE_URL = 'https://buy.stripe.com/REPLACE_WITH_YOUR_STRIPE_LINK'
@@ -736,16 +794,24 @@ function ScanScreen({ user, profile, onScanDone, modelState, modelProgress }) {
       </div>
 
       {/* Game selector */}
-      <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 8, marginBottom: 20, scrollbarWidth: 'none' }}>
+      <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 4, marginBottom: 20, scrollbarWidth: 'none' }}>
         {GAMES.map(g => (
           <button key={g.id} onClick={() => setGame(g.id)} style={{
-            flexShrink: 0, padding: '8px 14px', borderRadius: 12,
-            background: game === g.id ? g.color + '33' : COLORS.card,
+            flexShrink: 0,
+            padding: '10px 12px 9px',
+            borderRadius: 14,
+            background: game === g.id ? g.color + '18' : COLORS.card,
             border: `1.5px solid ${game === g.id ? g.color : COLORS.border}`,
             color: game === g.id ? g.color : COLORS.muted,
-            fontWeight: 700, fontSize: 13, display: 'flex', alignItems: 'center', gap: 6,
+            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5,
+            minWidth: 62,
+            boxShadow: game === g.id ? `0 0 14px ${g.color}28` : 'none',
+            transition: 'all .15s',
           }}>
-            {g.emoji} {g.label}
+            {g.logo}
+            <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.2, whiteSpace: 'nowrap' }}>
+              {g.label}
+            </span>
           </button>
         ))}
       </div>
