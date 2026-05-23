@@ -173,6 +173,25 @@ export default async function handler(req) {
         }
         const fields = 'id,image_url,cardmarket_url,price_eur'
 
+        // Map AI finish labels → pokemontcg.io rarity strings
+        function finishToRarity(finish) {
+          const map = {
+            'Special Illustration Rare': 'Special Illustration Rare',
+            'Illustration Rare': 'Illustration Rare',
+            'Hyper Rare': 'Rare Rainbow',
+            'Secret Rare': 'Rare Secret',
+            'Gold Secret Rare': 'Rare Secret',
+            'Full Art': 'Rare Ultra',
+            'Holo Rare': 'Rare Holo',
+            'Reverse Holo': 'Rare Holo V',
+            'Shiny Rare': 'Shiny Rare',
+            'Amazing Rare': 'Amazing Rare',
+            'Radiant Rare': 'Radiant Rare',
+            'Prism Star': 'Rare Prism',
+          }
+          return map[finish] || null
+        }
+
         // Build all number variants to try: "6", "06", "006", "SWSH006" etc.
         function numVariants(raw) {
           if (!raw) return []
@@ -229,7 +248,20 @@ export default async function handler(req) {
           }
         }
 
-        // Strategy 3: name + set (no number)
+        const parsedJson = JSON.parse(raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1))
+        const finish = parsedJson.finish || null
+        const rarity = finishToRarity(finish)
+        const rarityFilter = rarity ? `&rarity=ilike.${encodeURIComponent(`*${rarity}*`)}` : ''
+
+        // Strategy 3: name + set + rarity
+        if (!catalogId && setName) {
+          const rows = await tryFetch(
+            `${SUPABASE_URL}/rest/v1/card_catalog?${gameFilter}&${nameFilter}&set_name=ilike.${encodeURIComponent(`*${setName}*`)}${rarityFilter}&select=${fields}&limit=1`
+          )
+          if (rows[0]) applyHit(rows[0])
+        }
+
+        // Strategy 3b: name + set without rarity (looser)
         if (!catalogId && setName) {
           const rows = await tryFetch(
             `${SUPABASE_URL}/rest/v1/card_catalog?${gameFilter}&${nameFilter}&set_name=ilike.${encodeURIComponent(`*${setName}*`)}&select=${fields}&limit=1`
@@ -237,13 +269,18 @@ export default async function handler(req) {
           if (rows[0]) applyHit(rows[0])
         }
 
-        // Strategy 4: name + finish match (avoid wrong printing on name-only)
-        if (!catalogId) {
-          const parsed2 = JSON.parse(raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1))
-          const finish = parsed2.finish || null
-          const finishFilter = finish ? `&finish=ilike.${encodeURIComponent(`*${finish}*`)}` : ''
+        // Strategy 4: name + rarity (most reliable fallback for SIR/IR/etc.)
+        if (!catalogId && rarity) {
           const rows = await tryFetch(
-            `${SUPABASE_URL}/rest/v1/card_catalog?${gameFilter}&${nameFilter}${finishFilter}&select=${fields}&order=price_eur.desc.nullslast&limit=1`
+            `${SUPABASE_URL}/rest/v1/card_catalog?${gameFilter}&${nameFilter}${rarityFilter}&select=${fields}&order=price_eur.desc.nullslast&limit=1`
+          )
+          if (rows[0]) applyHit(rows[0])
+        }
+
+        // Strategy 5: name only — ordered by price desc as last resort
+        if (!catalogId) {
+          const rows = await tryFetch(
+            `${SUPABASE_URL}/rest/v1/card_catalog?${gameFilter}&${nameFilter}&select=${fields}&order=price_eur.desc.nullslast&limit=1`
           )
           if (rows[0]) applyHit(rows[0])
         }
@@ -298,24 +335,27 @@ function buildPrompt(game, hasBack) {
   }
   const gameName = gameNames[game] || game || 'TCG'
 
-  return `You are an expert in ${gameName} card identification and market value. Analyze ${hasBack ? 'these two images (front and back)' : 'this card image'} and identify the card precisely.
+  return `You are an expert ${gameName} card identifier. Analyze ${hasBack ? 'these two images (front and back)' : 'this card image'} and identify the card with maximum precision.
 
-The card is assumed to be in Near Mint (NM) condition — estimate market value based on Near Mint prices.
+CARD NUMBER — THIS IS CRITICAL:
+Look at the very bottom of the card for a number like "045/165" or "215/197" or "SV001". Special Illustration Rares and Secret Rares have numbers ABOVE the set total (e.g. "215/197"). Read this number exactly as printed — do not guess.
 
-Return ONLY this JSON object — no text before or after, no markdown, no code blocks:
+The card is assumed Near Mint — estimate market value at NM prices.
+
+Return ONLY valid JSON, no markdown, no extra text:
 {
-  "cardName": "<card name exactly as shown on the card>",
-  "cardNumber": "<card number e.g. 45/165 or just 45 — null if not visible>",
-  "setName": "<set name e.g. Obsidian Flames or Base Set — null if unknown>",
+  "cardName": "<name exactly as printed on card>",
+  "cardNumber": "<number at bottom of card e.g. 045/165 — null only if completely unreadable>",
+  "setName": "<set name from copyright line or set symbol e.g. Paldean Fates, Obsidian Flames>",
   "finish": "<one of: Normal | Holo Rare | Reverse Holo | Full Art | Secret Rare | Hyper Rare | Special Illustration Rare | Illustration Rare | Gold Secret Rare | Amazing Rare | Shiny Rare | Radiant Rare | Prism Star | 1st Edition | Shadowless | Promo | null>",
   "confidence": "<High|Mid|Low>",
-  "centering": "<description of centering>",
-  "corners": "<description of corners>",
-  "edges": "<description of edges>",
-  "surface": "<description of surface>",
-  "mainIssues": ["<visible issue1 if any>"],
+  "centering": "<centering description>",
+  "corners": "<corners description>",
+  "edges": "<edges description>",
+  "surface": "<surface description>",
+  "mainIssues": ["<issue if any>"],
   "worthGrading": <true|false>,
-  "estimatedPSAValue": "<Near Mint market value in EUR e.g. 50-80€>",
+  "estimatedPSAValue": "<NM market value in EUR e.g. 50-80€>",
   "gradingFee": "~25€",
   "recommendation": "<short recommendation in English>"
 }`
