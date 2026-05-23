@@ -82,15 +82,17 @@ async function countEra(era) {
 }
 
 async function processEra(era, extractor, stats) {
-  let offset = 0
   let eraDone = 0
+  const failedIds = new Set()
 
   while (true) {
-    const cards = await fetchBatch(era, offset, BATCH_SIZE)
-    if (!cards.length) break
+    const cards = await fetchBatch(era, 0, BATCH_SIZE)
+    // Skip cards that already failed — avoids infinite loop on bad image URLs
+    const pending = cards.filter(c => !failedIds.has(c.id))
+    if (!pending.length) break
 
-    for (let i = 0; i < cards.length; i += PARALLEL) {
-      const chunk = cards.slice(i, i + PARALLEL)
+    for (let i = 0; i < pending.length; i += PARALLEL) {
+      const chunk = pending.slice(i, i + PARALLEL)
       const results = await Promise.all(chunk.map(c => processCard(c, extractor)))
 
       for (let j = 0; j < chunk.length; j++) {
@@ -98,6 +100,7 @@ async function processEra(era, extractor, stats) {
           stats.done++
           eraDone++
         } else {
+          failedIds.add(chunk[j].id)
           stats.errors++
         }
       }
@@ -109,9 +112,6 @@ async function processEra(era, extractor, stats) {
       const card = chunk[chunk.length - 1]
       process.stdout.write(`\r  [${era}] ${stats.done}/${stats.total} ✓  ${(card.name || '').slice(0,18).padEnd(18)}  ${rate.toFixed(1)}/s  ${eta}   `)
     }
-
-    // Fetch next batch (cards now have embeddings, so offset stays 0 — filter changes)
-    // Re-fetch from offset=0 each time since embedding=is.null shrinks the result set
   }
 
   return eraDone
