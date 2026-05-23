@@ -2140,9 +2140,6 @@ function SearchScreen({ onSelectGame }) {
                     <span style={{ fontSize: 34, lineHeight: 1 }}>{game.emoji}</span>
                   )}
                 </div>
-                <div style={{ fontSize: 10, fontWeight: 700, color: `${game.color}cc`, textTransform: 'uppercase', letterSpacing: 0.8, textAlign: 'center' }}>
-                  {game.label}
-                </div>
               </button>
             )
           })}
