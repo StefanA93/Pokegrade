@@ -206,6 +206,11 @@ export default async function handler(req) {
             parsedFinishOverride = 'Secret Rare'
             debugInfo.finishOverride = `${parsed.finish}→Secret (${num}>${total})`
           }
+          // SIR requires number ABOVE set total (X > Y). If AI says SIR but X <= Y, it must be Ultra Rare.
+          if (parsed.finish === 'Special Illustration Rare' && !isNaN(num) && !isNaN(total) && total > 0 && num <= total) {
+            parsedFinishOverride = 'Ultra Rare'
+            debugInfo.finishOverride = `SIR→Ultra Rare (${num}<=${total}, within set)`
+          }
         }
       }
 
@@ -353,9 +358,22 @@ export default async function handler(req) {
             'Primal Clash': 'xy5', 'Roaring Skies': 'xy6', 'Ancient Origins': 'xy7',
             'BREAKthrough': 'xy8', 'BREAKpoint': 'xy9', 'Fates Collide': 'xy10',
             'Steam Siege': 'xy11', 'Evolutions': 'xy12',
+            // Mega Evolution (2025 SV-era Mega Pokémon set)
+            'Mega Evolution': 'me1',
           }
 
           debugInfo.hasApiKey = !!PTCG_API_KEY
+
+          // pokemontcg.io stores XY Mega Pokémon as "M X-EX" (e.g. "M Venusaur-EX")
+          // Claude may return "Mega Venusaur-EX" or "Mega Venusaur EX" — normalize both forms
+          let ptcgCardName = cardName
+          if (cardName && /^Mega\s+/i.test(cardName)) {
+            ptcgCardName = cardName.replace(/^Mega\s+/i, 'M ')  // "Mega " → "M "
+            ptcgCardName = ptcgCardName.replace(/\s+EX$/i, '-EX') // " EX" → "-EX" at end
+          }
+          if (ptcgCardName !== cardName) debugInfo.ptcgNameNorm = `${cardName}→${ptcgCardName}`
+          // SV-era sets may store "M X-EX" as "M X ex" (lowercase suffix, no hyphen)
+          const svExName = ptcgCardName.replace(/-EX$/i, ' ex')
 
           const ERA_TO_SET_PREFIX = {
             'SV': 'sv', 'SWSH': 'swsh', 'SM': 'sm', 'XY': 'xy',
@@ -452,98 +470,120 @@ export default async function handler(req) {
             // Pass 0_direct: exact set name → set.id lookup (most precise — skips fuzzy matching)
             // Only runs when AI returns a known specific set name (not a series name)
             const knownSetId = normSet ? SET_NAME_TO_ID[normSet] : null
-            if (knownSetId && cardName) {
+            if (knownSetId && ptcgCardName) {
               const rawNum = cardNumber?.split('/')?.[0]?.trim()
               const strippedNum = rawNum ? rawNum.replace(/^0+(?=\d)/, '') : null
-              // Try: name + set.id + number (most specific)
+              // set.id + number is a unique key — try WITHOUT name to bypass name-format issues
               if (rawNum) {
-                candidates = await queryPtcg(`name:"${cardName}" set.id:${knownSetId} number:${rawNum}`, 5)
+                candidates = await queryPtcg(`set.id:${knownSetId} number:${rawNum}`, 1)
                 if (!candidates.length && strippedNum && strippedNum !== rawNum) {
-                  candidates = await queryPtcg(`name:"${cardName}" set.id:${knownSetId} number:${strippedNum}`, 5)
+                  candidates = await queryPtcg(`set.id:${knownSetId} number:${strippedNum}`, 1)
+                }
+                if (candidates.length) debugInfo.ptcgQ = `setId+number:${knownSetId}#${rawNum}`
+              }
+              // Fallback: name + set.id (broader, name-dependent)
+              if (!candidates.length) {
+                candidates = await queryPtcg(`name:"${ptcgCardName}" set.id:${knownSetId}`, 10)
+                if (candidates.length) debugInfo.ptcgQ = `name+setId:${knownSetId}`
+              }
+            }
+
+            // Helper: discard candidates that are all from a wrong era (when era is known).
+            // Prevents early passes from locking onto cards from a different generation.
+            const eraPrefix = setEra ? ERA_TO_SET_PREFIX[setEra] : null
+            function eraOk(pool) {
+              if (!eraPrefix || !pool.length) return pool
+              const inEra = pool.filter(c => (c.set?.id || '').startsWith(eraPrefix))
+              return inEra.length ? inEra : pool // fall back to full pool only if era yields 0
+            }
+
+            // Pass 0c: card number — most precise single-card identifier
+            // Run BEFORE ability/attack so a specific number (e.g. 100/108) beats a shared ability
+            if (!candidates.length && cardNumber) {
+              const rawNum = cardNumber.split('/')[0].trim()
+              const strippedNum = rawNum.replace(/^0+(?=\d)/, '')
+              // Try all name variants: normalized, SV-era lowercase ex, original
+              const nameQuerySet = new Set([ptcgCardName])
+              if (svExName !== ptcgCardName) nameQuerySet.add(svExName)
+              if (cardName !== ptcgCardName) nameQuerySet.add(cardName)
+              const nameQueries = [...nameQuerySet]
+              for (const n of nameQueries) {
+                if (candidates.length) break
+                let numHits = await queryPtcg(`name:"${n}" number:${rawNum}`, 5)
+                if (!numHits.length && strippedNum !== rawNum) {
+                  numHits = await queryPtcg(`name:"${n}" number:${strippedNum}`, 5)
+                }
+                if (numHits.length) {
+                  candidates = eraOk(numHits)
+                  debugInfo.ptcgQ = `name+number(${n})`
                 }
               }
-              // Fallback: name + set.id only
-              if (!candidates.length) {
-                candidates = await queryPtcg(`name:"${cardName}" set.id:${knownSetId}`, 10)
-              }
-              if (candidates.length) debugInfo.ptcgQ = `name+setId:${knownSetId}`
             }
 
             // Pass 0a: ability name — most precise identifier (large printed text, not foil)
             if (!candidates.length && ability) {
-              candidates = await queryPtcg(`name:"${cardName}" abilities.name:"${ability.replace(/"/g, '')}"`)
-              if (candidates.length) debugInfo.ptcgQ = `ability:${ability}`
+              const abilityHits = await queryPtcg(`name:"${ptcgCardName}" abilities.name:"${ability.replace(/"/g, '')}"`)
+              if (abilityHits.length) {
+                candidates = eraOk(abilityHits)
+                debugInfo.ptcgQ = `ability:${ability}`
+              }
             }
 
             // Pass 0b: first attack name
             if (!candidates.length && attacks.length > 0) {
-              candidates = await queryPtcg(`name:"${cardName}" attacks.name:"${attacks[0].replace(/"/g, '')}"`)
-              if (candidates.length) debugInfo.ptcgQ = `attack:${attacks[0]}`
-            }
-
-            // Pass 0c: card number — most precise variant identifier (SIRs, Secrets, promos)
-            // Runs before HP so a specific number like "139" always beats the weaker hp signal
-            if (!candidates.length && cardNumber) {
-              const rawNum = cardNumber.split('/')[0].trim()
-              const strippedNum = rawNum.replace(/^0+(?=\d)/, '')
-              candidates = await queryPtcg(`name:"${cardName}" number:${rawNum}`, 5)
-              if (!candidates.length && strippedNum !== rawNum) {
-                candidates = await queryPtcg(`name:"${cardName}" number:${strippedNum}`, 5)
+              const attackHits = await queryPtcg(`name:"${ptcgCardName}" attacks.name:"${attacks[0].replace(/"/g, '')}"`)
+              if (attackHits.length) {
+                candidates = eraOk(attackHits)
+                debugInfo.ptcgQ = `attack:${attacks[0]}`
               }
-              if (candidates.length) debugInfo.ptcgQ = `name+number`
             }
 
             // Pass 0d: HP — narrows to specific card version when number lookup missed
             if (!candidates.length && hp) {
-              candidates = await queryPtcg(`name:"${cardName}" hp:${hp}`)
+              candidates = await queryPtcg(`name:"${ptcgCardName}" hp:${hp}`)
               if (candidates.length) debugInfo.ptcgQ = `name+hp:${hp}`
             }
 
             // Pass 1: name + specific set name (skip if it's a generic series name)
             if (!candidates.length && normSet && !SERIES_NAMES.has(normSet)) {
-              candidates = await queryPtcg(`name:"${cardName}" set.name:"${normSet}"`)
+              candidates = await queryPtcg(`name:"${ptcgCardName}" set.name:"${normSet}"`)
               debugInfo.ptcgQ = `name+set`
             }
 
             // Pass 2: series name → base set ID (e.g. "Scarlet & Violet (SV)" → sv1)
             if (!candidates.length && SERIES_TO_BASE[normSet]) {
-              candidates = await queryPtcg(`name:"${cardName}" set.id:${SERIES_TO_BASE[normSet]}`)
+              candidates = await queryPtcg(`name:"${ptcgCardName}" set.id:${SERIES_TO_BASE[normSet]}`)
               debugInfo.ptcgQ = `name+setId`
             }
 
             // Pass 3: promo sets (Promo finish or "Promo" in set name)
             if (!candidates.length && parsedFinish === 'Promo') {
-              candidates = await queryPtcg(`name:"${cardName}" supertype:Pokémon`)
+              candidates = await queryPtcg(`name:"${ptcgCardName}" supertype:Pokémon`)
               debugInfo.ptcgQ = `promo`
             }
 
             // Pass 3c: name + rarity — for premium finishes with wrong/missing number
             if (!candidates.length && parsedFinish && finishRarityQuery[parsedFinish]) {
-              candidates = await queryPtcg(`name:"${cardName}" ${finishRarityQuery[parsedFinish]}`)
+              candidates = await queryPtcg(`name:"${ptcgCardName}" ${finishRarityQuery[parsedFinish]}`)
               debugInfo.ptcgQ = `name+rarity`
             }
 
             // Pass 4: name only — top 10 newest, pick by rarity/number
             if (!candidates.length) {
-              candidates = await queryPtcg(`name:"${cardName}"`)
+              candidates = await queryPtcg(`name:"${ptcgCardName}"`)
               debugInfo.ptcgQ = `name-only`
             }
 
             // Pass 5: partial name (no quotes) — catches "Gothitelle ex", promos
             if (!candidates.length) {
-              candidates = await queryPtcg(`name:${cardName.replace(/["\s]/g, '*')}`)
+              candidates = await queryPtcg(`name:${ptcgCardName.replace(/["\s]/g, '*')}`)
               debugInfo.ptcgQ = `name-partial`
             }
 
             // Pass 6: ability-only — last resort when name is OCR-misread (e.g. "Gochitelle" → "Gothitelle")
-            // Finds the card by unique ability name even when the card name is completely wrong
             if (!candidates.length && ability) {
               const allAbility = await queryPtcg(`abilities.name:"${ability.replace(/"/g, '')}"`, 20)
-              // Filter to correct era to avoid wrong generation matches
-              const eraPrefix = setEra ? ERA_TO_SET_PREFIX[setEra] : null
-              candidates = eraPrefix
-                ? allAbility.filter(c => (c.set?.id || '').startsWith(eraPrefix))
-                : allAbility
+              candidates = eraOk(allAbility)
               if (!candidates.length) candidates = allAbility
               if (candidates.length) debugInfo.ptcgQ = `ability-only:${ability}`
             }
@@ -551,10 +591,7 @@ export default async function handler(req) {
             // Pass 6b: attack-only — last resort when name is wrong and no ability
             if (!candidates.length && attacks.length > 0) {
               const allAttack = await queryPtcg(`attacks.name:"${attacks[0].replace(/"/g, '')}"`, 20)
-              const eraPrefix = setEra ? ERA_TO_SET_PREFIX[setEra] : null
-              candidates = eraPrefix
-                ? allAttack.filter(c => (c.set?.id || '').startsWith(eraPrefix))
-                : allAttack
+              candidates = eraOk(allAttack)
               if (!candidates.length) candidates = allAttack
               if (candidates.length) debugInfo.ptcgQ = `attack-only:${attacks[0]}`
             }
@@ -562,17 +599,48 @@ export default async function handler(req) {
             debugInfo.ptcgCount = candidates.length
 
             const best = pickBest(candidates, ptcgRarityStr, nums.length ? nums : null, normSet, ability, attacks, hp)
-            if (best) {
-              catalogId = best.id
-              officialImageUrl = best.images?.large || best.images?.small || null
-              catalogPriceEur = best.cardmarket?.prices?.averageSellPrice || null
-              catalogCardmarketUrl = best.cardmarket?.url || null
+            // Only commit to PTCG result if score is high enough (≥45%) when scoring path was used.
+            const MIN_PTCG_SCORE = 45
+            const ptcgScore = debugInfo.pickScore // percentage (0-100), undefined if fallback path
+            if (best && (ptcgScore === undefined || ptcgScore >= MIN_PTCG_SCORE)) {
+              let commitCard = best
+              const aiSaysUltraRare = parsedFinish === 'Ultra Rare'
+              const ptcgSaysPremium = /Special Illustration|Illustration Rare|Rare Rainbow/i.test(best.rarity || '')
+
+              // If AI says Ultra Rare but PTCG found SIR/IR, look for the Ultra Rare variant
+              // in the same set — it exists at a different (lower) card number
+              if (aiSaysUltraRare && ptcgSaysPremium && best.set?.id) {
+                try {
+                  const urNames = [...new Set([ptcgCardName, svExName, cardName].filter(Boolean))]
+                  let urCommit = null
+                  for (const n of urNames) {
+                    if (urCommit) break
+                    const hits = await queryPtcg(
+                      `name:"${n}" set.id:${best.set.id} rarity:"Rare Ultra"`, 3
+                    )
+                    if (hits.length) urCommit = hits[0]
+                  }
+                  if (urCommit) {
+                    commitCard = urCommit
+                    debugInfo.ptcgUrFallback = `SIR→UR: ${best.id}→${urCommit.id}`
+                  }
+                } catch { /* keep best */ }
+              }
+
+              catalogId = commitCard.id
+              officialImageUrl = commitCard.images?.large || commitCard.images?.small || null
+              catalogPriceEur = commitCard.cardmarket?.prices?.averageSellPrice || null
+              catalogCardmarketUrl = commitCard.cardmarket?.url || null
               debugInfo.catalogHit = true
               debugInfo.source = 'ptcg'
-              verifiedRarity = best.rarity || null
-              verifiedSetName = best.set?.name || null
-              verifiedNumber = best.number || null
+              verifiedRarity = (aiSaysUltraRare && ptcgSaysPremium && !debugInfo.ptcgUrFallback)
+                ? 'Rare Ultra'
+                : (commitCard.rarity || null)
+              verifiedSetName = commitCard.set?.name || null
+              verifiedNumber = commitCard.number || null
               debugInfo.verified = `${verifiedRarity} · ${verifiedSetName} · #${verifiedNumber}`
+            } else if (best) {
+              debugInfo.ptcgSkipped = `skipped ${best.id}: score ${ptcgScore}%<${MIN_PTCG_SCORE}%`
             }
           } catch (ptcgErr) {
             debugInfo.ptcgError = ptcgErr.message
@@ -754,13 +822,14 @@ function buildIdentifyPrompt(game, hasBack) {
   return `You are an expert ${gameName} card identifier. Analyze ${hasBack ? 'these two images (front and back)' : 'this card image'} and identify the card with maximum precision.
 
 CARD NUMBER — CRITICAL: The second image is an enlarged crop of the bottom of the card.
-- Standard set cards: number is ALWAYS in "X/Y" format (e.g. "045/165", "215/197")
+- Standard set cards: number is ALWAYS in "X/Y" format where BOTH X and Y are numbers (e.g. "045/165", "215/197", "100/108")
+- The set series name (XY, SV, SWSH) may appear AFTER the number on the same line — e.g. "100/108 XY EVOLUTIONS". The series label is NOT part of the number. Return only "100/108", not "100/XY".
 - Promo cards: number is NEVER in X/Y format — it is a standalone code (e.g. "SVP EN 113", "SWSH052", "SM229")
 - If you see a promo code without "/" → return it exactly as-is and set finish = Promo
 - Return null ONLY if completely unreadable
 
 SET NAME — CRITICAL: Read the SPECIFIC set name from the small text at the very bottom of the card.
-Known English set names (return these exactly): Scarlet & Violet, Paldea Evolved, Obsidian Flames, 151, Paradox Rift, Paldean Fates, Temporal Forces, Twilight Masquerade, Shrouded Fable, Stellar Crown, Surging Sparks, Prismatic Evolutions, Destined Rivals, Brilliant Stars, Astral Radiance, Lost Origin, Silver Tempest, Crown Zenith, Evolving Skies, Fusion Strike, Chilling Reign, Battle Styles, Rebel Clash, Vivid Voltage, Darkness Ablaze.
+Known English set names (return these exactly): Scarlet & Violet, Paldea Evolved, Obsidian Flames, 151, Paradox Rift, Paldean Fates, Temporal Forces, Twilight Masquerade, Shrouded Fable, Stellar Crown, Surging Sparks, Prismatic Evolutions, Destined Rivals, Mega Evolution, Brilliant Stars, Astral Radiance, Lost Origin, Silver Tempest, Crown Zenith, Evolving Skies, Fusion Strike, Chilling Reign, Battle Styles, Rebel Clash, Vivid Voltage, Darkness Ablaze, Evolutions.
 - Do NOT return a series name like "Scarlet & Violet Series" — return the exact product name.
 - If Japanese, unreadable, or uncertain → return null. NEVER guess.
 
@@ -781,8 +850,8 @@ STEP 1 — NUMBER ZONE CHECK (X/Y format only):
 
 STEP 2 — VISUAL IDENTIFICATION (use rarity symbol + artwork to confirm):
 ★★★ gold = Hyper Rare: Entire card is gold metallic including borders, text boxes, and artwork area.
-★★ gold = Special Illustration Rare (SIR): Full-bleed edge-to-edge artwork, NO visible art box border, Pokémon name floats as small text over illustration, always an ex-Pokémon, always numbered ABOVE set total (X > Y). Heavy etched ridged texture you can feel.
-★★ silver = Ultra Rare: Full Art ex card or Trainer Full Art. Extended artwork but still has a visible card frame. Numbered WITHIN set total.
+★★ gold = Special Illustration Rare (SIR): GOLD ★★ symbol. Truly edge-to-edge full-bleed artwork — NO card frame, NO name box, NO attack text boxes visible anywhere. Pokémon name floats as tiny text directly over the illustration. Always an ex-Pokémon. ALWAYS numbered ABOVE set total (X > Y). Heavy etched ridged foil texture.
+★★ silver = Ultra Rare: SILVER ★★ symbol. Full Art ex card or Trainer Full Art — extended artwork, but the card RETAINS a visible frame: you can see the name box at the top, HP, attack text boxes, and/or energy costs. Numbered WITHIN set total (X < Y). DO NOT confuse with SIR — the card frame elements are still present and the number does not exceed the set total.
 ★ gold = Illustration Rare (IR): Artwork extends significantly beyond art box. Card name/HP area at the TOP retains partial standard frame. Always a non-ex Pokémon. Numbered WITHIN set total.
 ★★ black = Double Rare: Standard ex card layout with visible art box. Numbered in lower half of set.
 ★ black = Rare (Holo): Standard rectangular art box CLEARLY VISIBLE. Holofoil only inside art rectangle.
@@ -792,9 +861,10 @@ STEP 2 — VISUAL IDENTIFICATION (use rarity symbol + artwork to confirm):
 ★ Promo: See Step 0. Requires visible promo stamp or code.
 
 CRITICAL RULES:
-- SIR requires ALL of: edge-to-edge art + no art box + ex Pokémon + number above set total + no promo stamp
+- SIR requires ALL of: GOLD ★★ symbol + edge-to-edge art + NO card frame visible + ex Pokémon + number ABOVE set total (X > Y) + no promo stamp
+- Ultra Rare: SILVER ★★ symbol + Full Art ex or Trainer Full Art + card frame elements still visible + ALWAYS numbered WITHIN set total (X < Y). If a Full Art ex card is numbered within the set (X < Y) → it is Ultra Rare, NOT SIR.
 - IR requires: extended art + partial top frame + non-ex Pokémon + number within set total
-- A card with number WITHIN the set total (X < Y) cannot be SIR
+- A card with number WITHIN the set total (X < Y) CANNOT be SIR — it must be Ultra Rare or lower
 - Promo cards can look exactly like SIR — the promo stamp/code is the only difference
 
 The card is assumed Near Mint — estimate market value at NM prices.
