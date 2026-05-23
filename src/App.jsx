@@ -2038,9 +2038,19 @@ function SettingsScreen({ user, profile, onSignOut }) {
   )
 }
 
+const GAME_LOGOS = {
+  pokemon:    '/logos/pokemon.svg',
+  mtg:        '/logos/mtg.png',
+  yugioh:     '/logos/yugioh.svg',
+  onepiece:   '/logos/onepiece.png',
+  dragonball: '/logos/dragonball.png',
+  lorcana:    '/logos/lorcana.png',
+}
+
 // SEARCH SCREEN
 function SearchScreen({ onSelectGame }) {
   const [query, setQuery] = useState('')
+  const [imgErrors, setImgErrors] = useState({})
 
   return (
     <div style={{ paddingBottom: 110, maxWidth: 480, margin: '0 auto' }}>
@@ -2074,44 +2084,48 @@ function SearchScreen({ onSelectGame }) {
       <div style={{ padding: '28px 16px 0' }}>
         <div style={{ fontWeight: 800, fontSize: 18, marginBottom: 16 }}>Quick Filters</div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-          {GAMES.map(game => (
-            <button
-              key={game.id}
-              onClick={() => onSelectGame(game.id)}
-              style={{
-                background: `radial-gradient(ellipse at 35% 30%, ${game.color}22 0%, ${COLORS.card} 70%)`,
-                border: `1px solid ${game.color}45`,
-                borderRadius: 18,
-                height: 118,
-                display: 'flex', flexDirection: 'column',
-                alignItems: 'center', justifyContent: 'center',
-                gap: 10, cursor: 'pointer',
-                position: 'relative', overflow: 'hidden',
-                padding: '16px 12px 12px',
-                boxShadow: `0 4px 24px ${game.color}10, inset 0 1px 0 ${game.color}18`,
-                transition: 'transform .12s, box-shadow .12s',
-              }}
-            >
-              {/* Subtle corner glow */}
-              <div style={{
-                position: 'absolute', top: -20, right: -20,
-                width: 70, height: 70, borderRadius: '50%',
-                background: `radial-gradient(circle, ${game.color}20, transparent 70%)`,
-                pointerEvents: 'none',
-              }} />
-              <div style={{ color: game.color, lineHeight: 0 }}>
-                {React.cloneElement(game.logo, { width: 46, height: 46 })}
-              </div>
-              <div style={{
-                fontSize: 11, fontWeight: 800,
-                color: `${game.color}dd`,
-                textTransform: 'uppercase', letterSpacing: 1,
-                textAlign: 'center',
-              }}>
-                {game.label}
-              </div>
-            </button>
-          ))}
+          {GAMES.map(game => {
+            const logoUrl = GAME_LOGOS[game.id]
+            const hasLogo = logoUrl && !imgErrors[game.id]
+            return (
+              <button
+                key={game.id}
+                onClick={() => onSelectGame(game.id)}
+                style={{
+                  background: `radial-gradient(ellipse at 30% 30%, ${game.color}25 0%, #111 65%)`,
+                  border: `1px solid ${game.color}40`,
+                  borderRadius: 16,
+                  height: 110,
+                  display: 'flex', flexDirection: 'column',
+                  alignItems: 'center', justifyContent: 'center',
+                  gap: 8, cursor: 'pointer',
+                  position: 'relative', overflow: 'hidden',
+                  padding: '14px 12px 10px',
+                }}
+              >
+                <div style={{ width: '100%', height: 56, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  {hasLogo ? (
+                    <img
+                      src={logoUrl}
+                      alt={game.label}
+                      referrerPolicy="no-referrer"
+                      onError={() => setImgErrors(e => ({ ...e, [game.id]: true }))}
+                      style={{
+                        maxWidth: game.id === 'dragonball' ? '96%' : '88%',
+                        maxHeight: game.id === 'dragonball' ? 62 : 54,
+                        width: 'auto', height: 'auto', objectFit: 'contain',
+                      }}
+                    />
+                  ) : (
+                    <span style={{ fontSize: 34, lineHeight: 1 }}>{game.emoji}</span>
+                  )}
+                </div>
+                <div style={{ fontSize: 10, fontWeight: 700, color: `${game.color}cc`, textTransform: 'uppercase', letterSpacing: 0.8, textAlign: 'center' }}>
+                  {game.label}
+                </div>
+              </button>
+            )
+          })}
         </div>
       </div>
     </div>
