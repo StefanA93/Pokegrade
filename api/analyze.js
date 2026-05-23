@@ -254,17 +254,22 @@ export default async function handler(req) {
         if (game === 'pokemon' && cardName) {
           const ptcgHeaders = PTCG_API_KEY ? { 'X-Api-Key': PTCG_API_KEY } : {}
 
+          // Normalise AI set name: strip parenthetical suffixes like "(SV)", "(swsh)" etc.
+          const normaliseSet = s => s ? s.replace(/\s*\(.*?\)\s*/g, '').trim() : s
+          const normSet = normaliseSet(setName)
+
           // Generic series names that do NOT correspond to specific sets
           const SERIES_NAMES = new Set([
             'Scarlet & Violet', 'Sword & Shield', 'Sun & Moon', 'XY',
-            'Black & White', 'HeartGold SoulSilver', 'Diamond & Pearl',
-            'EX Series', 'EX', 'Neo', 'Base Set Series'
+            'Black & White', 'HeartGold & SoulSilver', 'HeartGold SoulSilver',
+            'Diamond & Pearl', 'EX Series', 'EX', 'Neo', 'Base Set Series',
           ])
-          // Map series → most common base set ID as a useful fallback
+          // Map series → base set ID
           const SERIES_TO_BASE = {
             'Scarlet & Violet': 'sv1', 'Sword & Shield': 'swsh1',
             'Sun & Moon': 'sm1', 'XY': 'xy1', 'Black & White': 'bw1',
-            'HeartGold SoulSilver': 'hgss1', 'Diamond & Pearl': 'dp1',
+            'HeartGold SoulSilver': 'hgss1', 'HeartGold & SoulSilver': 'hgss1',
+            'Diamond & Pearl': 'dp1',
           }
 
           const queryPtcg = async (q, size = 10) => {
@@ -307,15 +312,15 @@ export default async function handler(req) {
           try {
             let candidates = []
 
-            // Pass 1: name + specific set name (only if not a generic series name)
-            if (setName && !SERIES_NAMES.has(setName)) {
-              candidates = await queryPtcg(`name:"${cardName}" set.name:"${setName}"`)
+            // Pass 1: name + specific set name (skip if it's a generic series name)
+            if (normSet && !SERIES_NAMES.has(normSet)) {
+              candidates = await queryPtcg(`name:"${cardName}" set.name:"${normSet}"`)
               debugInfo.ptcgQ = `name+set`
             }
 
-            // Pass 2: name + set ID mapped from series name (e.g. "Scarlet & Violet" → sv1)
-            if (!candidates.length && setName && SERIES_TO_BASE[setName]) {
-              candidates = await queryPtcg(`name:"${cardName}" set.id:${SERIES_TO_BASE[setName]}`)
+            // Pass 2: series name → base set ID (e.g. "Scarlet & Violet (SV)" → sv1)
+            if (!candidates.length && SERIES_TO_BASE[normSet]) {
+              candidates = await queryPtcg(`name:"${cardName}" set.id:${SERIES_TO_BASE[normSet]}`)
               debugInfo.ptcgQ = `name+setId`
             }
 
