@@ -254,9 +254,12 @@ export default async function handler(req) {
         if (game === 'pokemon' && cardName) {
           const ptcgHeaders = PTCG_API_KEY ? { 'X-Api-Key': PTCG_API_KEY } : {}
 
-          // Normalise AI set name: strip parenthetical suffixes like "(SV)", "(swsh)" etc.
+          // Sanitise AI set name: null it if AI returned a description instead of a real set name
+          const BAD_SET_PATTERNS = /unknown|illegible|cannot|unreadable|unclear|not visible|blurry|n\/a/i
+          const cleanSet = (setName && !BAD_SET_PATTERNS.test(setName)) ? setName : null
+          // Strip parenthetical suffixes like "(SV)", "(swsh)" etc.
           const normaliseSet = s => s ? s.replace(/\s*\(.*?\)\s*/g, '').trim() : s
-          const normSet = normaliseSet(setName)
+          const normSet = normaliseSet(cleanSet)
 
           // Generic series names that do NOT correspond to specific sets
           const SERIES_NAMES = new Set([
@@ -482,7 +485,7 @@ Return ONLY valid JSON, no markdown, no extra text:
 {
   "cardName": "<name exactly as printed on card>",
   "cardNumber": "<number e.g. 045/165 — null only if unreadable in BOTH images>",
-  "setName": "<specific set name e.g. Obsidian Flames, Paradox Rift, Paldean Fates — NOT a series name>",
+  "setName": "<specific set name from copyright line e.g. Obsidian Flames, Paradox Rift, Paldean Fates — null if unreadable, NEVER a description of why it is unreadable>",
   "finish": "<one of: Normal | Holo Rare | Reverse Holo | Full Art | Secret Rare | Hyper Rare | Special Illustration Rare | Illustration Rare | Gold Secret Rare | Amazing Rare | Shiny Rare | Radiant Rare | Prism Star | 1st Edition | Shadowless | Promo — REQUIRED, never null for Pokémon>",
   "confidence": "<High|Mid|Low>",
   "centering": "<centering description>",
