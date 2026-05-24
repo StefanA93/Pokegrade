@@ -538,7 +538,23 @@ async function _handler(req) {
                 if (!candidates.length && strippedNum && strippedNum !== rawNum) {
                   candidates = await queryPtcg(`set.id:${effectiveSetId} number:${strippedNum}`, 1)
                 }
-                if (candidates.length) debugInfo.ptcgQ = `setId+number:${effectiveSetId}#${rawNum}`
+                if (candidates.length) {
+                  debugInfo.ptcgQ = `setId+number:${effectiveSetId}#${rawNum}`
+                  // Discard if found card is a different Pokémon — AI may have misread the card number
+                  // (e.g. sv3#003 = Charizard when AI is looking for Exeggutor). Without this check,
+                  // the wrong card blocks all later ability/name passes from running.
+                  const aiSpecies = ptcgCardName.toLowerCase()
+                    .replace(/^(mega|m)\s+/i, '')
+                    .replace(/[-\s]+(ex|gx|vmax|vstar|tera)(\s|$)/i, '')
+                    .split(/[\s\-]/)[0]
+                  if (aiSpecies.length >= 4) {
+                    const foundCardName = (candidates[0]?.name || '').toLowerCase()
+                    if (!foundCardName.includes(aiSpecies)) {
+                      debugInfo.p0dMismatch = `${candidates[0]?.id}(${candidates[0]?.name})≠${aiSpecies}`
+                      candidates = []
+                    }
+                  }
+                }
               }
               // Fallback: name + set.id (broader, name-dependent)
               if (!candidates.length) {
@@ -910,17 +926,24 @@ async function _handler(req) {
         }
 
         // Strategy 4: name + rarity (most reliable fallback for SIR/IR/etc.)
+        // When AI has a specific known set name, constrain to it to avoid committing a cross-set card
+        // (e.g. picking me1-135 when AI said "Obsidian Flames" and that card isn't in the catalog).
+        // If the card truly isn't in the catalog for that set, we correctly return no catalog match.
         if (!catalogId && rarity) {
+          const s4SetFilter = (setName && normSet && !SERIES_NAMES.has(normSet))
+            ? `&set_name=ilike.${encodeURIComponent(`*${setName}*`)}` : ''
           const rows = await tryFetch(
-            `${SUPABASE_URL}/rest/v1/card_catalog?${gameFilter}&${nameFilter}${rarityFilter}${langFilter}&select=${fields}&order=price_eur.desc.nullslast&limit=1`
+            `${SUPABASE_URL}/rest/v1/card_catalog?${gameFilter}&${nameFilter}${rarityFilter}${s4SetFilter}${langFilter}&select=${fields}&order=price_eur.desc.nullslast&limit=1`
           )
           if (rows[0]) applyHit(rows[0], 's4')
         }
 
         // Strategy 5: name + rarity — correct finish, newest first
         if (!catalogId && rarity) {
+          const s5SetFilter = (setName && normSet && !SERIES_NAMES.has(normSet))
+            ? `&set_name=ilike.${encodeURIComponent(`*${setName}*`)}` : ''
           const rows = await tryFetch(
-            `${SUPABASE_URL}/rest/v1/card_catalog?${gameFilter}&${nameFilter}${rarityFilter}${langFilter}&select=${fields}&order=id.desc&limit=1`
+            `${SUPABASE_URL}/rest/v1/card_catalog?${gameFilter}&${nameFilter}${rarityFilter}${s5SetFilter}${langFilter}&select=${fields}&order=id.desc&limit=1`
           )
           if (rows[0]) applyHit(rows[0], 's5')
         }
