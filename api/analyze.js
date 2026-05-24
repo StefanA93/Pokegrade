@@ -163,6 +163,8 @@ export default async function handler(req) {
   let verifiedSetName = matchedCard?.set_name || null
   let verifiedNumber = matchedCard?.number || null
   let debugInfo = { cardName: matchedCard?.name || null, catalogHit: !!matchedCard?.id, source: matchedCard?.id ? 'embedding' : null }
+  // Top-level AI finish — set once from parsed JSON, read at the end for safety override
+  let _aiFinish = null
 
   if (useGradingOnly && matchedCard?.name) {
     debugInfo.cardName = matchedCard.name
@@ -185,6 +187,7 @@ export default async function handler(req) {
       const attacks = Array.isArray(parsed.attacks) ? parsed.attacks.filter(Boolean) : []
       const hp = parsed.hp ? String(parsed.hp) : null
       const setEra = parsed.setEra || null
+      _aiFinish = parsed.finish || null  // capture before any overrides, for safety net below
       debugInfo.cardName = cardName
       debugInfo.ability = ability
       debugInfo.hp = hp
@@ -788,6 +791,16 @@ export default async function handler(req) {
   } catch (e) {
     debugInfo.error = e.message
   }
+
+  // TOP-LEVEL SAFETY OVERRIDE: if AI identified Ultra Rare but catalog returned SIR/IR,
+  // trust the AI. The rarity symbol (silver vs gold ★★) is visually unambiguous.
+  // This catches cases where the UR variant search accepted a wrong card or failed silently.
+  if (_aiFinish === 'Ultra Rare' && /Special Illustration Rare|Illustration Rare|Rare Rainbow/i.test(verifiedRarity || '')) {
+    const _prevRarity = verifiedRarity
+    verifiedRarity = 'Rare Ultra'
+    debugInfo.rarityForcedUR = `${_prevRarity} → Rare Ultra (AI said Ultra Rare)`
+  }
+  debugInfo.aiFinish = _aiFinish
 
   // Log scan i Supabase
   await fetch(`${SUPABASE_URL}/rest/v1/scan_logs`, {
