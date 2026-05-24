@@ -480,9 +480,26 @@ async function _handler(req) {
               }
             }
 
+            // Cross-era rarity synonyms: pokemontcg.io uses different strings for same tier
+            // across generations (e.g. "Rare Rainbow" in SWSH = "Hyper Rare" in SV).
+            const RARITY_SYN = {
+              'rare rainbow': ['rare rainbow', 'hyper rare'],
+              'hyper rare': ['hyper rare', 'rare rainbow'],
+              'rare ultra': ['rare ultra', 'ultra rare'],
+              'ultra rare': ['ultra rare', 'rare ultra'],
+              'rare secret': ['rare secret', 'secret rare'],
+              'special illustration rare': ['special illustration rare'],
+              'illustration rare': ['illustration rare'],
+              'rare holo ex': ['rare holo ex', 'double rare'],
+            }
+            const raritySynonyms = targetRarityStr
+              ? (RARITY_SYN[targetRarityStr.toLowerCase()] || [targetRarityStr.toLowerCase().split(' ')[0]])
+              : []
+            const rarityMatch = c => raritySynonyms.some(s => (c.rarity || '').toLowerCase().includes(s))
+
             if (targetNums?.length && targetRarityStr) {
               for (const num of targetNums) {
-                const m = pool.find(c => c.number === num && c.rarity?.toLowerCase().includes(targetRarityStr.toLowerCase().split(' ')[0]))
+                const m = pool.find(c => c.number === num && rarityMatch(c))
                 if (m) return m
               }
             }
@@ -493,8 +510,7 @@ async function _handler(req) {
               }
             }
             if (targetRarityStr) {
-              const keyword = targetRarityStr.toLowerCase().split(' ')[0]
-              const m = pool.find(c => c.rarity?.toLowerCase().includes(keyword))
+              const m = pool.find(rarityMatch)
               if (m) return m
             }
             const isPremiumFinish = targetRarityStr &&
@@ -562,6 +578,32 @@ async function _handler(req) {
               if (!candidates.length) {
                 candidates = await queryPtcg(`name:"${ptcgCardName}" set.id:${effectiveSetId}`, 10)
                 if (candidates.length) debugInfo.ptcgQ = `name+setId:${effectiveSetId}`
+              }
+
+              // Pass 0_premium: HR / SIR / IR cards have numbers in the most unreadable foil zone.
+              // When set is known, search directly by name + setId + exact rarity — skips the
+              // unreliable number entirely and finds the right variant directly.
+              // Tries both SV-era and SWSH-era rarity strings for the same tier.
+              if (!candidates.length && parsedFinish) {
+                const PREM_RARITY_MAP = {
+                  'Hyper Rare':                  ['"Hyper Rare"', '"Rare Rainbow"'],
+                  'Special Illustration Rare':   ['"Special Illustration Rare"'],
+                  'Illustration Rare':           ['"Illustration Rare"'],
+                  'Amazing Rare':                ['"Amazing Rare"'],
+                  'Shiny Rare':                  ['"Shiny Rare"'],
+                }
+                const premRarities = PREM_RARITY_MAP[parsedFinish] || []
+                for (const nameVariant of [ptcgCardName, svExName].filter((v, i, a) => v && a.indexOf(v) === i)) {
+                  for (const r of premRarities) {
+                    if (candidates.length) break
+                    const hits = await queryPtcg(`name:"${nameVariant}" set.id:${effectiveSetId} rarity:${r}`, 3)
+                    if (hits.length) {
+                      candidates = hits
+                      debugInfo.ptcgQ = `prem:${r.replace(/"/g, '')}+${effectiveSetId}`
+                    }
+                  }
+                  if (candidates.length) break
+                }
               }
             }
 
@@ -751,7 +793,7 @@ async function _handler(req) {
 
               catalogId = commitCard.id
               officialImageUrl = commitCard.images?.large || commitCard.images?.small || null
-              catalogPriceEur = commitCard.cardmarket?.prices?.averageSellPrice || null
+              catalogPriceEur = commitCard.cardmarket?.prices?.trendPrice || commitCard.cardmarket?.prices?.averageSellPrice || null
               catalogCardmarketUrl = commitCard.cardmarket?.url || null
               debugInfo.catalogHit = true
               debugInfo.source = 'ptcg'
@@ -794,7 +836,7 @@ async function _handler(req) {
                 if (gurHit) {
                   catalogId = gurHit.id
                   officialImageUrl = gurHit.images?.large || gurHit.images?.small || null
-                  catalogPriceEur = gurHit.cardmarket?.prices?.averageSellPrice || null
+                  catalogPriceEur = gurHit.cardmarket?.prices?.trendPrice || gurHit.cardmarket?.prices?.averageSellPrice || null
                   catalogCardmarketUrl = gurHit.cardmarket?.url || null
                   debugInfo.catalogHit = true
                   debugInfo.source = 'ptcg-global-ur'
@@ -818,7 +860,7 @@ async function _handler(req) {
                 if (gurBHit) {
                   catalogId = gurBHit.id
                   officialImageUrl = gurBHit.images?.large || gurBHit.images?.small || null
-                  catalogPriceEur = gurBHit.cardmarket?.prices?.averageSellPrice || null
+                  catalogPriceEur = gurBHit.cardmarket?.prices?.trendPrice || gurBHit.cardmarket?.prices?.averageSellPrice || null
                   catalogCardmarketUrl = gurBHit.cardmarket?.url || null
                   debugInfo.catalogHit = true
                   debugInfo.source = 'ptcg-global-ur'
@@ -868,7 +910,7 @@ async function _handler(req) {
                 if (gurCHit) {
                   catalogId = gurCHit.id
                   officialImageUrl = gurCHit.images?.large || gurCHit.images?.small || null
-                  catalogPriceEur = gurCHit.cardmarket?.prices?.averageSellPrice || null
+                  catalogPriceEur = gurCHit.cardmarket?.prices?.trendPrice || gurCHit.cardmarket?.prices?.averageSellPrice || null
                   catalogCardmarketUrl = gurCHit.cardmarket?.url || null
                   debugInfo.catalogHit = true
                   debugInfo.source = 'ptcg-global-ur'
