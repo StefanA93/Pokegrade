@@ -943,11 +943,11 @@ async function _handler(req) {
         }
 
         // Strategy 4: name + rarity (most reliable fallback for SIR/IR/etc.)
-        // When AI has a specific known set name, constrain to it to avoid committing a cross-set card
-        // (e.g. picking me1-135 when AI said "Obsidian Flames" and that card isn't in the catalog).
-        // If the card truly isn't in the catalog for that set, we correctly return no catalog match.
+        // For Pokémon: when AI has a specific set name, constrain to it to avoid cross-set false
+        // matches (e.g. me1-135 when AI said "Obsidian Flames"). setName is in outer scope;
+        // normSet/SERIES_NAMES are only in the inner pokemon block so are not referenced here.
         if (!catalogId && rarity) {
-          const s4SetFilter = (setName && normSet && !SERIES_NAMES.has(normSet))
+          const s4SetFilter = (game === 'pokemon' && setName)
             ? `&set_name=ilike.${encodeURIComponent(`*${setName}*`)}` : ''
           const rows = await tryFetch(
             `${SUPABASE_URL}/rest/v1/card_catalog?${gameFilter}&${nameFilter}${rarityFilter}${s4SetFilter}${langFilter}&select=${fields}&order=price_eur.desc.nullslast&limit=1`
@@ -957,7 +957,7 @@ async function _handler(req) {
 
         // Strategy 5: name + rarity — correct finish, newest first
         if (!catalogId && rarity) {
-          const s5SetFilter = (setName && normSet && !SERIES_NAMES.has(normSet))
+          const s5SetFilter = (game === 'pokemon' && setName)
             ? `&set_name=ilike.${encodeURIComponent(`*${setName}*`)}` : ''
           const rows = await tryFetch(
             `${SUPABASE_URL}/rest/v1/card_catalog?${gameFilter}&${nameFilter}${rarityFilter}${s5SetFilter}${langFilter}&select=${fields}&order=id.desc&limit=1`
