@@ -709,13 +709,17 @@ export default async function handler(req) {
           // → knownSetId targets wrong set → number/name/ability searches all miss the real card.
           // This bypass searches globally without set constraint: ability + name + rarity:"Rare Ultra".
           if (!catalogId && _aiFinish === 'Ultra Rare' && ability) {
+            const _gurAbility = ability.replace(/"/g, '')
+            const gurNames = [...new Set([ptcgCardName, svExName, cardName, megaSvExName].filter(Boolean))]
+            debugInfo.gurAttempt = `ability:${_gurAbility} names:${gurNames.join('|')}`
             try {
-              const gurNames = [...new Set([ptcgCardName, svExName, cardName, megaSvExName].filter(Boolean))]
+              // Pass GUR-A: ability + name + rarity:"Rare Ultra"
               for (const n of gurNames) {
                 if (catalogId) break
                 const gurHits = await queryPtcg(
-                  `abilities.name:"${ability.replace(/"/g, '')}" name:"${n}" rarity:"Rare Ultra"`, 5
+                  `abilities.name:"${_gurAbility}" name:"${n}" rarity:"Rare Ultra"`, 5
                 )
+                debugInfo.gurCountA = (debugInfo.gurCountA || 0) + gurHits.length
                 const gurHit = gurHits.find(c => /^Rare Ultra$/i.test(c.rarity || ''))
                 if (gurHit) {
                   catalogId = gurHit.id
@@ -728,10 +732,32 @@ export default async function handler(req) {
                   verifiedSetName = gurHit.set?.name || null
                   verifiedNumber = gurHit.number || null
                   debugInfo.verified = `${verifiedRarity} · ${verifiedSetName} · #${verifiedNumber}`
-                  debugInfo.ptcgGlobalUr = `${n}+${ability}→${gurHit.id}`
+                  debugInfo.ptcgGlobalUr = `GUR-A:${n}+${ability}→${gurHit.id}`
                 }
               }
-            } catch { /* silent */ }
+              // Pass GUR-B: ability only + rarity:"Rare Ultra" — no name constraint
+              // Handles: ability stored correctly but name format differs
+              if (!catalogId) {
+                const gurBHits = await queryPtcg(`abilities.name:"${_gurAbility}" rarity:"Rare Ultra"`, 10)
+                debugInfo.gurCountB = gurBHits.length
+                const gurBHit = gurBHits.find(c => /^Rare Ultra$/i.test(c.rarity || ''))
+                if (gurBHit) {
+                  catalogId = gurBHit.id
+                  officialImageUrl = gurBHit.images?.large || gurBHit.images?.small || null
+                  catalogPriceEur = gurBHit.cardmarket?.prices?.averageSellPrice || null
+                  catalogCardmarketUrl = gurBHit.cardmarket?.url || null
+                  debugInfo.catalogHit = true
+                  debugInfo.source = 'ptcg-global-ur'
+                  verifiedRarity = 'Rare Ultra'
+                  verifiedSetName = gurBHit.set?.name || null
+                  verifiedNumber = gurBHit.number || null
+                  debugInfo.verified = `${verifiedRarity} · ${verifiedSetName} · #${verifiedNumber}`
+                  debugInfo.ptcgGlobalUr = `GUR-B:${ability}→${gurBHit.id}`
+                }
+              }
+            } catch (gurErr) {
+              debugInfo.gurError = gurErr.message
+            }
           }
         }
 
