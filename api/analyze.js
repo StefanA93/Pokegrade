@@ -6,6 +6,17 @@ const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY
 const PTCG_API_KEY = process.env.PTCG_API_KEY || process.env.TCG_API_KEY
 
 export default async function handler(req) {
+  try {
+    return await _handler(req)
+  } catch (fatal) {
+    return new Response(JSON.stringify({ error: 'Internal error', detail: fatal?.message }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+    })
+  }
+}
+
+async function _handler(req) {
   if (req.method === 'OPTIONS') {
     return new Response(null, {
       headers: {
@@ -401,10 +412,18 @@ export default async function handler(req) {
 
           const queryPtcg = async (q, size = 10) => {
             const url = `https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(q)}&orderBy=-set.releaseDate&pageSize=${size}&select=id,images,cardmarket,set,rarity,number,abilities,attacks,hp`
-            const r = await fetch(url, { headers: ptcgHeaders })
-            if (!r.ok) { debugInfo.ptcgStatus = r.status; return [] }
-            const d = await r.json()
-            return d.data || []
+            const ctrl = new AbortController()
+            const timer = setTimeout(() => ctrl.abort(), 6000)
+            try {
+              const r = await fetch(url, { headers: ptcgHeaders, signal: ctrl.signal })
+              clearTimeout(timer)
+              if (!r.ok) { debugInfo.ptcgStatus = r.status; return [] }
+              const d = await r.json()
+              return d.data || []
+            } catch {
+              clearTimeout(timer)
+              return []
+            }
           }
 
           // Pick best card using multi-signal scoring: ability(0.40) + attacks(0.30) + hp(0.15) + number(0.10) + rarity(0.05)
