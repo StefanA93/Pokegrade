@@ -7,9 +7,9 @@ Sports card grading app. Users fotograferer kort, OCR + Claude API analyserer de
 - **Frontend**: React 18, Vite 5, JSX (ingen TypeScript i dette projekt)
 - **Backend**: Vercel Edge Functions (`/api/` mappen)
 - **Database + Auth**: Supabase (PostgreSQL + Supabase Auth)
-- **OCR**: tesseract.js — tekstgenkendelse fra kortbilleder
+- **Vision/Embedding**: `@huggingface/transformers` — CLIP-model i `src/recognition/EmbeddingExtractor.js`
 - **AI**: Anthropic Claude API — kortanalyse i `api/analyze.js`
-- **PWA**: vite-plugin-pwa + Workbox — offline support + installérbar app
+- **PWA**: `public/manifest.json` + `public/sw.js` (cleanup SW — ingen caching). `vite-plugin-pwa` er i devDeps men ikke konfigureret; intentionelt fjernet pga. cache-problemer.
 - **Deployment**: Vercel (frontend + Edge Functions)
 
 ## Vigtige Filer
@@ -17,16 +17,21 @@ Sports card grading app. Users fotograferer kort, OCR + Claude API analyserer de
 ```
 gradedex/
 ├── src/
-│   ├── App.jsx          # Hele appens UI og state (monolitisk komponent)
-│   └── main.jsx         # React entry point
+│   ├── App.jsx                          # Hele appens UI og state (monolitisk komponent)
+│   ├── main.jsx                         # React entry point
+│   └── recognition/
+│       ├── EmbeddingExtractor.js        # CLIP-model wrapper (@huggingface/transformers)
+│       └── MultiFrameBuffer.js          # Multi-frame embedding buffer (reserveret til live-scan)
 ├── api/
-│   ├── analyze.js       # Edge Function: Claude API kortanalyse
-│   └── cardimage.js     # Edge Function: kortbillede hentning
+│   ├── analyze.js       # Edge Function: Claude API kortanalyse + PTCG lookup
+│   └── cardimage.js     # Edge Function: kortbillede hentning (pokemontcg.io, Scryfall, YGO)
 ├── public/
-│   └── manifest.json    # PWA manifest
-├── index.html           # App shell
-├── vite.config.js       # Vite + PWA konfiguration
-└── vercel.json          # Vercel routing + security headers
+│   ├── manifest.json    # PWA manifest
+│   ├── sw.js            # Cleanup service worker — clears old caches + self-destructs
+│   └── logos/           # Game logos (SVG/PNG)
+├── index.html           # App shell + HTML splash
+├── vite.config.js       # Vite konfiguration (ingen PWA plugin)
+└── vercel.json          # Vercel routing + security headers + CSP
 ```
 
 ## Environment Variables
@@ -98,6 +103,11 @@ Vercel auto-deployer fra `main` branch. Edge Functions i `/api/` deployeres auto
 
 ## Kendte Mønstre
 
-- Kortanalyse flow: Bruger → foto → tesseract.js OCR → `api/analyze.js` (Claude) → Supabase gem
+- Kortanalyse flow: Bruger → foto → crop → `api/analyze.js` (Claude) → PTCG lookup → Supabase gem
+- Embedding flow (valgfri): `EmbeddingExtractor.js` (CLIP) → `/api/match` → pre-identified card → Claude kun grader kondition
 - Auth flow: Supabase Auth JWT → valideret i hver Edge Function
-- PWA install prompt: håndteres i App.jsx med `beforeinstallprompt` event
+- Debug panel: Vises kun i development (`import.meta.env.DEV`) — skjult i production
+
+## Stripe
+
+`STRIPE_URL` i App.jsx er en placeholder (`https://buy.stripe.com/REPLACE_WITH_YOUR_STRIPE_LINK`). Skal sættes til et rigtigt Stripe Payment Link inden launch.

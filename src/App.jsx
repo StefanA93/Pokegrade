@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, createContext, useContext } from 'react'
+import React, { useState, useEffect, useRef, createContext, useContext } from 'react'
 import { createClient } from '@supabase/supabase-js'
 
 // ─── Supabase ────────────────────────────────────────────────────────────────
@@ -10,7 +10,7 @@ const supabase = createClient(
 // ─── Constants ───────────────────────────────────────────────────────────────
 const GAMES = [
   {
-    id: 'pokemon', label: 'Pokémon', color: '#FFCB05',
+    id: 'pokemon', label: 'Pokémon', emoji: '⚡', color: '#FFCB05',
     logo: (
       <svg viewBox="0 0 24 24" width="26" height="26" fill="none">
         <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="1.5"/>
@@ -22,7 +22,7 @@ const GAMES = [
     ),
   },
   {
-    id: 'mtg', label: 'Magic', color: '#a29bfe',
+    id: 'mtg', label: 'Magic', emoji: '🔮', color: '#a29bfe',
     logo: (
       <svg viewBox="0 0 24 24" width="26" height="26" fill="none">
         <polygon points="12,2 14.5,9 22,9 16,13.5 18.5,21 12,16.5 5.5,21 8,13.5 2,9 9.5,9"
@@ -31,7 +31,7 @@ const GAMES = [
     ),
   },
   {
-    id: 'yugioh', label: 'Yu-Gi-Oh!', color: '#fdcb6e',
+    id: 'yugioh', label: 'Yu-Gi-Oh!', emoji: '⚔️', color: '#fdcb6e',
     logo: (
       <svg viewBox="0 0 24 24" width="26" height="26" fill="none">
         <ellipse cx="12" cy="12" rx="10" ry="6" stroke="currentColor" strokeWidth="1.5"/>
@@ -41,7 +41,7 @@ const GAMES = [
     ),
   },
   {
-    id: 'onepiece', label: 'One Piece', color: '#e17055',
+    id: 'onepiece', label: 'One Piece', emoji: '⚓', color: '#e17055',
     logo: (
       <svg viewBox="0 0 24 24" width="26" height="26" fill="none">
         <circle cx="12" cy="9" r="6" fill="currentColor" fillOpacity="0.2" stroke="currentColor" strokeWidth="1.5"/>
@@ -53,7 +53,7 @@ const GAMES = [
     ),
   },
   {
-    id: 'dragonball', label: 'Dragon Ball', color: '#f39c12',
+    id: 'dragonball', label: 'Dragon Ball', emoji: '🐉', color: '#f39c12',
     logo: (
       <svg viewBox="0 0 24 24" width="26" height="26" fill="none">
         <circle cx="12" cy="12" r="10" fill="currentColor" fillOpacity="0.2" stroke="currentColor" strokeWidth="1.5"/>
@@ -64,7 +64,7 @@ const GAMES = [
     ),
   },
   {
-    id: 'lorcana', label: 'Lorcana', color: '#74b9ff',
+    id: 'lorcana', label: 'Lorcana', emoji: '✨', color: '#74b9ff',
     logo: (
       <svg viewBox="0 0 24 24" width="26" height="26" fill="none">
         <path d="M12 3C9 7 4 12 4 16a8 8 0 0 0 16 0c0-4-5-9-8-13Z"
@@ -737,7 +737,7 @@ function ScanScreen({ user, profile, onScanDone, modelState, modelProgress }) {
             }
           }
         }
-      } catch (_embErr) {
+      } catch {
         // Embedding not available — fall through to Claude identification
       }
 
@@ -1201,8 +1201,8 @@ function GradeResult({ result, game, frontImg, user, onSave }) {
           }</div>
         </div>
 
-        {/* Debug info — temporary */}
-        {result._debug && (
+        {/* Debug info — dev only */}
+        {import.meta.env.DEV && result._debug && (
           <div style={{ background: '#111', border: '1px solid #333', borderRadius: 10, padding: 10, marginBottom: 10, fontSize: 10, color: '#aaa', fontFamily: 'monospace', lineHeight: 1.6 }}>
             <div style={{ color: COLORS.gold, fontWeight: 700, marginBottom: 4 }}>🔍 Catalog Debug</div>
             <div>AI name: <b style={{ color: '#fff' }}>{result.cardName || '—'}</b> · HP: <b style={{ color: result._debug.hp ? COLORS.success : '#666' }}>{result._debug.hp || '—'}</b> · era: <b style={{ color: '#fff' }}>{result._debug.setEra || '—'}</b></div>
@@ -1855,76 +1855,6 @@ function CardItem({ card, onDelete, fmtVal = formatEur, currency = 'EUR' }) {
 
         </div>
       </div>
-    </div>
-  )
-}
-
-// ROI CALCULATOR
-function ROIScreen() {
-  const [cards, setCards] = useState([{ name: '', grade: 8, currentValue: '', expectedPSAValue: '' }])
-  const gradingFee = 25
-
-  function addCard() {
-    setCards(c => [...c, { name: '', grade: 8, currentValue: '', expectedPSAValue: '' }])
-  }
-
-  function updateCard(i, field, val) {
-    setCards(c => c.map((card, idx) => idx === i ? { ...card, [field]: val } : card))
-  }
-
-  function removeCard(i) {
-    setCards(c => c.filter((_, idx) => idx !== i))
-  }
-
-  const results = cards.map(card => {
-    const cost = (parseFloat(card.currentValue) || 0) + gradingFee
-    const revenue = parseFloat(card.expectedPSAValue) || 0
-    const profit = revenue - cost
-    const roi = cost > 0 ? ((profit / cost) * 100).toFixed(0) : 0
-    return { ...card, cost, revenue, profit, roi }
-  })
-
-  const totalProfit = results.reduce((s, r) => s + r.profit, 0)
-  const totalCost = results.reduce((s, r) => s + r.cost, 0)
-  const totalROI = totalCost > 0 ? ((totalProfit / totalCost) * 100).toFixed(0) : 0
-
-  const inp = { background: COLORS.bg, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: '10px 12px', color: COLORS.text, fontSize: 14, outline: 'none', width: '100%' }
-
-  return (
-    <div style={{ padding: '16px 16px 100px', maxWidth: 480, margin: '0 auto' }}>
-      <h2 style={{ fontWeight: 900, fontSize: 22, marginBottom: 6, paddingTop: 8 }}>PSA Batch ROI</h2>
-      <p style={{ color: COLORS.muted, fontSize: 14, marginBottom: 20 }}>Calculate whether it's worth sending your cards to PSA grading.</p>
-
-      {/* Summary */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 20 }}>
-        {[['Total Profit', formatEur(totalProfit), totalProfit >= 0 ? COLORS.success : COLORS.danger], ['Total ROI', `${totalROI}%`, parseFloat(totalROI) >= 0 ? COLORS.gold : COLORS.danger], ['Fee/Card', formatEur(gradingFee), COLORS.muted]].map(([label, val, color]) => (
-          <Card key={label} style={{ padding: 12, textAlign: 'center' }}>
-            <div style={{ fontSize: 11, color: COLORS.muted, marginBottom: 4 }}>{label}</div>
-            <div style={{ fontWeight: 900, color, fontSize: 15 }}>{val}</div>
-          </Card>
-        ))}
-      </div>
-
-      {cards.map((card, i) => (
-        <Card key={i} style={{ marginBottom: 12 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
-            <span style={{ fontWeight: 700 }}>Card {i + 1}</span>
-            {cards.length > 1 && <button onClick={() => removeCard(i)} style={{ color: COLORS.danger, fontSize: 13 }}>Remove</button>}
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-            <div><label style={{ fontSize: 11, color: COLORS.muted }}>Current raw value (€)</label><input style={inp} type="number" value={card.currentValue} onChange={e => updateCard(i, 'currentValue', e.target.value)} placeholder="0" /></div>
-            <div><label style={{ fontSize: 11, color: COLORS.muted }}>Expected PSA slab value (€)</label><input style={inp} type="number" value={card.expectedPSAValue} onChange={e => updateCard(i, 'expectedPSAValue', e.target.value)} placeholder="0" /></div>
-          </div>
-          {(results[i].cost > 0 || results[i].revenue > 0) && (
-            <div style={{ marginTop: 12, padding: 10, background: COLORS.bg, borderRadius: 10, display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ color: COLORS.muted, fontSize: 13 }}>Profit</span>
-              <span style={{ fontWeight: 900, color: results[i].profit >= 0 ? COLORS.success : COLORS.danger }}>{formatEur(results[i].profit)} ({results[i].roi}% ROI)</span>
-            </div>
-          )}
-        </Card>
-      ))}
-
-      <Btn onClick={addCard} variant="ghost" style={{ marginBottom: 12 }}>+ Add Card</Btn>
     </div>
   )
 }

@@ -158,7 +158,6 @@ async function _handler(req) {
 
   if (!anthropicRes.ok) {
     const err = await anthropicRes.text()
-    console.error('Anthropic error:', err)
     return new Response(JSON.stringify({ error: 'AI analysis failed' }), { status: 502 })
   }
 

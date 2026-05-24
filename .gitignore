@@ -11,3 +11,7 @@ dist
 .env.vercel
 .cache/
 .claude/
+
+# Accidental screenshots
+public/logos/Screenshot_*.jpg
+public/logos/Screenshot_*.png
