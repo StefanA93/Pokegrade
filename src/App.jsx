@@ -952,7 +952,7 @@ function GradeResult({ result, game, frontImg, user, onSave }) {
     }
 
     // Prefer catalog EUR price; fall back to parsing AI estimate string "40-65€" → avg
-    const valueStr = result.estimatedPSAValue || ''
+    const valueStr = result.estimatedRawValue || ''
     const nums = [...valueStr.matchAll(/\d+/g)].map(m => parseFloat(m[0]))
     const parsedValueNum = nums.length >= 2 ? (nums[0] + nums[1]) / 2 : nums[0] || null
     const valueNum = result.catalogPriceEur || parsedValueNum || null
@@ -964,7 +964,7 @@ function GradeResult({ result, game, frontImg, user, onSave }) {
       grade: 7,
       finish: result.verifiedRarity || result.finish || null,
       value: valueNum,
-      price_range: result.estimatedPSAValue || null,
+      price_range: result.estimatedRawValue || null,
       image_url: result.officialImageUrl || imageUrl,
       notes: result.recommendation,
       card_number: result.verifiedNumber || result.cardNumber || null,
@@ -1155,12 +1155,12 @@ function GradeResult({ result, game, frontImg, user, onSave }) {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
             <div>
               <div style={{ fontSize: 10, color: COLORS.muted, textTransform: 'uppercase', letterSpacing: 1, fontWeight: 700, marginBottom: 4 }}>
-                {result.catalogPriceEur ? 'Cardmarket Price' : 'Estimated Value'}
+                {result.catalogPriceEur ? 'Raw Market Price' : 'Raw Market Est.'}
               </div>
               <div style={{ fontSize: 28, fontWeight: 700, color: COLORS.gold, fontFamily: FONT_VALUE, letterSpacing: -0.5, lineHeight: 1 }}>
                 {result.catalogPriceEur
                   ? new Intl.NumberFormat('da-DK', { style: 'currency', currency: 'EUR' }).format(result.catalogPriceEur)
-                  : (result.estimatedPSAValue || '—')
+                  : (result.estimatedRawValue || '—')
                 }
               </div>
             </div>
@@ -1181,10 +1181,10 @@ function GradeResult({ result, game, frontImg, user, onSave }) {
             <span style={{ fontSize: 12, color: COLORS.muted }}>PSA Grading Fee</span>
             <span style={{ fontSize: 13, fontWeight: 700, color: COLORS.text }}>{result.gradingFee || '~25€'}</span>
           </div>
-          {result.catalogPriceEur && result.estimatedPSAValue && (
+          {result.catalogPriceEur && result.estimatedRawValue && (
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 6 }}>
-              <span style={{ fontSize: 12, color: COLORS.muted }}>PSA Value Estimate</span>
-              <span style={{ fontSize: 12, fontWeight: 600, color: `${COLORS.gold}cc` }}>{result.estimatedPSAValue}</span>
+              <span style={{ fontSize: 12, color: COLORS.muted }}>AI Raw Est.</span>
+              <span style={{ fontSize: 12, fontWeight: 600, color: `${COLORS.gold}cc` }}>{result.estimatedRawValue}</span>
             </div>
           )}
         </div>
@@ -1207,9 +1207,22 @@ function GradeResult({ result, game, frontImg, user, onSave }) {
           }</div>
         </div>
 
-        {/* Debug info — dev only */}
+        {/* Handlingsknapper */}
+        {saveError && <p style={{ color: COLORS.danger, fontSize: 12, textAlign: 'center', marginBottom: 4 }}>{saveError}</p>}
+        <div style={{ display: 'flex', gap: 10, paddingTop: 4 }}>
+          <Btn onClick={save} disabled={saving || saved} small style={{ flex: 1 }}>
+            {saved ? '✓ Saved to Collection' : saving ? <Spinner size={16} color="#0a0a12" /> : 'Save to Collection'}
+          </Btn>
+          {navigator.share && (
+            <button onClick={share} style={{ flexShrink: 0, width: 44, height: 44, borderRadius: 12, background: COLORS.card, border: `1.5px solid ${COLORS.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }} aria-label="Share analysis">
+              ↑
+            </button>
+          )}
+        </div>
+
+        {/* Debug info */}
         {result._debug && (
-          <div style={{ background: '#111', border: '1px solid #333', borderRadius: 10, padding: 10, marginBottom: 10, fontSize: 10, color: '#aaa', fontFamily: 'monospace', lineHeight: 1.6 }}>
+          <div style={{ background: '#111', border: '1px solid #333', borderRadius: 10, padding: 10, marginTop: 12, fontSize: 10, color: '#aaa', fontFamily: 'monospace', lineHeight: 1.6 }}>
             <div style={{ color: COLORS.gold, fontWeight: 700, marginBottom: 4 }}>🔍 Catalog Debug</div>
             <div>AI name: <b style={{ color: '#fff' }}>{result.cardName || '—'}</b> · HP: <b style={{ color: result._debug.hp ? COLORS.success : '#666' }}>{result._debug.hp || '—'}</b> · era: <b style={{ color: '#fff' }}>{result._debug.setEra || '—'}</b></div>
             <div>AI ability: <b style={{ color: result._debug.ability ? '#a78bfa' : '#666' }}>{result._debug.ability || 'none'}</b></div>
@@ -1239,19 +1252,6 @@ function GradeResult({ result, game, frontImg, user, onSave }) {
             {result._debug.error && <div style={{ color: COLORS.danger }}>err: {result._debug.error}</div>}
           </div>
         )}
-
-        {/* Handlingsknapper */}
-        {saveError && <p style={{ color: COLORS.danger, fontSize: 12, textAlign: 'center', marginBottom: 4 }}>{saveError}</p>}
-        <div style={{ display: 'flex', gap: 10, paddingTop: 4 }}>
-          <Btn onClick={save} disabled={saving || saved} small style={{ flex: 1 }}>
-            {saved ? '✓ Saved to Collection' : saving ? <Spinner size={16} color="#0a0a12" /> : 'Save to Collection'}
-          </Btn>
-          {navigator.share && (
-            <button onClick={share} style={{ flexShrink: 0, width: 44, height: 44, borderRadius: 12, background: COLORS.card, border: `1.5px solid ${COLORS.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }} aria-label="Share analysis">
-              ↑
-            </button>
-          )}
-        </div>
       </div>
     </Card>
   )

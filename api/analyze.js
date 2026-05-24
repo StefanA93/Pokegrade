@@ -1055,7 +1055,7 @@ Return ONLY valid JSON, no markdown, no extra text:
   "surface": "<surface condition>",
   "mainIssues": ["<specific defect if any>"],
   "worthGrading": <true|false>,
-  "estimatedPSAValue": "<NM market value estimate in EUR>",
+  "estimatedRawValue": "<UNGRADED raw market price in EUR for NM condition — raw (unslabbed) NM copy price TODAY, not a PSA graded price>",
   "gradingFee": "~25€",
   "recommendation": "<short actionable recommendation in English>"
 }`
@@ -1154,7 +1154,7 @@ Return ONLY valid JSON, no markdown, no extra text:
   "surface": "<surface description>",
   "mainIssues": ["<issue if any>"],
   "worthGrading": <true|false>,
-  "estimatedPSAValue": "<NM market value in EUR e.g. 50-80€>",
+  "estimatedRawValue": "<UNGRADED raw market price in EUR for NM condition — the price a collector pays for a raw (unslabbed) NM copy TODAY, e.g. 40-60€. Do NOT estimate a PSA 9 or PSA 10 graded price — raw only>",
   "gradingFee": "~25€",
   "recommendation": "<short recommendation in English>"
 }`
