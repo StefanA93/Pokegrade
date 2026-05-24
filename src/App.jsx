@@ -1210,7 +1210,8 @@ function GradeResult({ result, game, frontImg, user, onSave }) {
             <div>ptcg pass: <b style={{ color: '#fff' }}>{result._debug.ptcgQ || '—'}</b> · <b style={{ color: result._debug.ptcgCount > 0 ? COLORS.success : COLORS.danger }}>{result._debug.ptcgCount ?? '?'} hits</b>{result._debug.pickScore != null ? <span style={{ color: '#a78bfa' }}> · score {result._debug.pickScore}%</span> : null}</div>
             <div>Strategy: <b style={{ color: '#fff' }}>{result._debug.source || '—'}</b> · ID: <b style={{ color: '#fff' }}>{result.catalogId || '—'}</b> · key: <b style={{ color: result._debug.hasApiKey ? COLORS.success : COLORS.danger }}>{result._debug.hasApiKey ? '✓' : '✗'}</b></div>
             {result._debug.rarityDbg && <div style={{ color: '#a78bfa', fontSize: 11 }}>rarity: {result._debug.rarityDbg}</div>}
-            {result._debug.ptcgUrNumHit && <div style={{ color: COLORS.success, fontSize: 11 }}>UR num hit: {result._debug.ptcgUrNumHit}</div>}
+            {result._debug.ptcgUrNumHit && <div style={{ color: COLORS.success, fontSize: 11 }}>UR num: {result._debug.ptcgUrNumHit}</div>}
+            {result._debug.ptcgUrAbilityHit && <div style={{ color: COLORS.success, fontSize: 11 }}>UR ability: {result._debug.ptcgUrAbilityHit}</div>}
             {result._debug.numNorm && <div style={{ color: '#e67e22', fontSize: 11 }}>numNorm: {result._debug.numNorm}</div>}
             {result._debug.ptcgSkipped && <div style={{ color: '#e67e22', fontSize: 11 }}>{result._debug.ptcgSkipped}</div>}
             {result._debug.ptcgStatus && <div style={{ color: '#e67e22' }}>ptcg HTTP {result._debug.ptcgStatus} (Vercel IP blokeret?)</div>}

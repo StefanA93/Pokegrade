@@ -643,7 +643,7 @@ export default async function handler(req) {
                   }
 
                   // Pass B: set.id + card number — most direct, bypasses name format entirely
-                  // e.g. set.id:me1 number:002 → finds the Ultra Rare at that exact position
+                  // e.g. set.id:me1 number:155 → finds the Ultra Rare at that exact position
                   if (!urCommit && cardNumber) {
                     const rawNum2 = cardNumber.split('/')[0].trim()
                     const stripped2 = rawNum2.replace(/^0+(?=\d)/, '')
@@ -651,12 +651,25 @@ export default async function handler(req) {
                     for (const n of numsToTry) {
                       if (urCommit) break
                       const numHits = await queryPtcg(`set.id:${best.set.id} number:${n}`, 3)
-                      // Accept only if it's NOT another SIR/IR/premium that we're already on
                       const urHit = numHits.find(c => /^Rare Ultra$/i.test(c.rarity || ''))
                       if (urHit) {
                         urCommit = urHit
                         debugInfo.ptcgUrNumHit = `${best.set.id}#${n}→${urHit.id}`
                       }
+                    }
+                  }
+
+                  // Pass C: set + rarity + ability — bypasses BOTH name and number issues.
+                  // Most reliable when AI misreads the card number (e.g. 002 instead of 155).
+                  // Finds the UR in the same set that shares the ability with the SIR.
+                  if (!urCommit && ability) {
+                    const abilityUrHits = await queryPtcg(
+                      `set.id:${best.set.id} rarity:"Rare Ultra" abilities.name:"${ability.replace(/"/g, '')}"`, 5
+                    )
+                    const urHit = abilityUrHits.find(c => /^Rare Ultra$/i.test(c.rarity || ''))
+                    if (urHit) {
+                      urCommit = urHit
+                      debugInfo.ptcgUrAbilityHit = `${best.set.id} UR+${ability}→${urHit.id}`
                     }
                   }
 
