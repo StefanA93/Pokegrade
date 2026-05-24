@@ -1208,7 +1208,7 @@ function GradeResult({ result, game, frontImg, user, onSave }) {
         </div>
 
         {/* Debug info — dev only */}
-        {import.meta.env.DEV && result._debug && (
+        {result._debug && (
           <div style={{ background: '#111', border: '1px solid #333', borderRadius: 10, padding: 10, marginBottom: 10, fontSize: 10, color: '#aaa', fontFamily: 'monospace', lineHeight: 1.6 }}>
             <div style={{ color: COLORS.gold, fontWeight: 700, marginBottom: 4 }}>🔍 Catalog Debug</div>
             <div>AI name: <b style={{ color: '#fff' }}>{result.cardName || '—'}</b> · HP: <b style={{ color: result._debug.hp ? COLORS.success : '#666' }}>{result._debug.hp || '—'}</b> · era: <b style={{ color: '#fff' }}>{result._debug.setEra || '—'}</b></div>
