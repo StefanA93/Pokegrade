@@ -786,12 +786,16 @@ async function _handler(req) {
                   debugInfo.ptcgGlobalUr = `GUR-A:${n}+${ability}→${gurHit.id}`
                 }
               }
-              // Pass GUR-B: ability only + rarity:"Rare Ultra" — no name constraint
-              // Handles: ability stored correctly but name format differs
+              // Pass GUR-B: ability only + rarity — no name constraint
+              // Tries both "Rare Ultra" (pre-SV) and "Ultra Rare" (SV-era) since pokemontcg.io
+              // uses different strings across generations for the same card tier.
               if (!catalogId) {
-                const gurBHits = await queryPtcg(`abilities.name:"${_gurAbility}" rarity:"Rare Ultra"`, 10)
+                let gurBHits = await queryPtcg(`abilities.name:"${_gurAbility}" rarity:"Rare Ultra"`, 10)
+                if (!gurBHits.length) {
+                  gurBHits = await queryPtcg(`abilities.name:"${_gurAbility}" rarity:"Ultra Rare"`, 10)
+                }
                 debugInfo.gurCountB = gurBHits.length
-                const gurBHit = gurBHits.find(c => /^Rare Ultra$/i.test(c.rarity || ''))
+                const gurBHit = gurBHits.find(c => /^(Rare Ultra|Ultra Rare)$/i.test(c.rarity || ''))
                 if (gurBHit) {
                   catalogId = gurBHit.id
                   officialImageUrl = gurBHit.images?.large || gurBHit.images?.small || null
@@ -827,10 +831,17 @@ async function _handler(req) {
                 const speciesMatches = gurCHits.filter(matchesSpecies)
                 let gurCHit = null
                 if (speciesMatches.length) {
-                  if (/Ultra Rare|Full Art/i.test(_aiFinish || '')) {
-                    gurCHit = speciesMatches.find(c => /^Rare Ultra$/i.test(c.rarity || '')) || speciesMatches[0]
+                  // "Secret Rare" included: AI often calls me1-era Ultra Rares "Secret Rare"
+                  // because they're numbered above set total (X > Y), a pattern traditionally
+                  // used for secrets. The ★★ colour (silver = UR, gold = SIR) is the real signal.
+                  if (/Ultra Rare|Full Art|Secret Rare/i.test(_aiFinish || '')) {
+                    gurCHit = speciesMatches.find(c => /^Rare Ultra$/i.test(c.rarity || ''))
+                           || speciesMatches.find(c => /^Ultra Rare$/i.test(c.rarity || ''))
+                           || speciesMatches[0]
                   } else if (/Special Illustration/i.test(_aiFinish || '')) {
                     gurCHit = speciesMatches.find(c => /Special Illustration/i.test(c.rarity || '')) || speciesMatches[0]
+                  } else if (/Illustration Rare/i.test(_aiFinish || '')) {
+                    gurCHit = speciesMatches.find(c => /^Illustration Rare$/i.test(c.rarity || '')) || speciesMatches[0]
                   } else {
                     gurCHit = speciesMatches[0]
                   }
@@ -842,7 +853,7 @@ async function _handler(req) {
                   catalogCardmarketUrl = gurCHit.cardmarket?.url || null
                   debugInfo.catalogHit = true
                   debugInfo.source = 'ptcg-global-ur'
-                  verifiedRarity = /^Rare Ultra$/i.test(gurCHit.rarity || '') ? 'Rare Ultra' : (gurCHit.rarity || null)
+                  verifiedRarity = /^(Rare Ultra|Ultra Rare)$/i.test(gurCHit.rarity || '') ? 'Rare Ultra' : (gurCHit.rarity || null)
                   verifiedSetName = gurCHit.set?.name || null
                   verifiedNumber = gurCHit.number || null
                   debugInfo.verified = `${verifiedRarity} · ${verifiedSetName} · #${verifiedNumber}`
