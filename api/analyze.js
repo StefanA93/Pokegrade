@@ -708,10 +708,13 @@ export default async function handler(req) {
           // Core problem: AI misidentifies the set (e.g. "Evolutions" instead of "Mega Evolution")
           // → knownSetId targets wrong set → number/name/ability searches all miss the real card.
           // This bypass searches globally without set constraint: ability + name + rarity:"Rare Ultra".
-          if (!catalogId && _aiFinish === 'Ultra Rare' && ability) {
+          // Trigger GUR for any premium finish — AI inconsistently calls same card
+          // "Ultra Rare", "Secret Rare", "Full Art" etc. depending on scan quality.
+          const _gurPremium = _aiFinish && /Ultra Rare|Secret Rare|Special Illustration|Illustration Rare|Rare Rainbow|Hyper Rare|Full Art|Double Rare/i.test(_aiFinish)
+          if (!catalogId && _gurPremium && ability) {
             const _gurAbility = ability.replace(/"/g, '')
             const gurNames = [...new Set([ptcgCardName, svExName, cardName, megaSvExName].filter(Boolean))]
-            debugInfo.gurAttempt = `ability:${_gurAbility} names:${gurNames.join('|')}`
+            debugInfo.gurAttempt = `fin:${_aiFinish} ability:${_gurAbility} names:${gurNames.join('|')}`
             try {
               // Pass GUR-A: ability + name + rarity:"Rare Ultra"
               for (const n of gurNames) {
@@ -852,7 +855,7 @@ export default async function handler(req) {
   // TOP-LEVEL SAFETY OVERRIDE: if AI identified Ultra Rare but catalog returned SIR/IR,
   // trust the AI. The rarity symbol (silver vs gold ★★) is visually unambiguous.
   // This catches cases where the UR variant search accepted a wrong card or failed silently.
-  if (_aiFinish === 'Ultra Rare' && /Special Illustration Rare|Illustration Rare|Rare Rainbow/i.test(verifiedRarity || '')) {
+  if (/Ultra Rare|Secret Rare|Full Art/i.test(_aiFinish || '') && /Special Illustration Rare|Illustration Rare|Rare Rainbow/i.test(verifiedRarity || '')) {
     const _prevRarity = verifiedRarity
     verifiedRarity = 'Rare Ultra'
     debugInfo.rarityForcedUR = `${_prevRarity} → Rare Ultra (AI said Ultra Rare)`
