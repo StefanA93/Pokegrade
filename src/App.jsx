@@ -244,6 +244,12 @@ function formatEur(val) {
   return new Intl.NumberFormat('da-DK', { style: 'currency', currency: 'EUR' }).format(val)
 }
 
+function formatCurrency(val, currency) {
+  if (!val && val !== 0) return '—'
+  const converted = val * (EXCHANGE_RATES[currency] ?? 1)
+  return new Intl.NumberFormat('da-DK', { style: 'currency', currency, maximumFractionDigits: 2 }).format(converted)
+}
+
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const globalStyle = `
   * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
@@ -1321,11 +1327,7 @@ function HomeScreen({ user, profile, onGoScan, onViewAll }) {
     localStorage.setItem('gradedex_currency', next)
   }
 
-  function fmtVal(val) {
-    if (!val && val !== 0) return '—'
-    const converted = val * (EXCHANGE_RATES[currency] ?? 1)
-    return new Intl.NumberFormat('da-DK', { style: 'currency', currency, maximumFractionDigits: 2 }).format(converted)
-  }
+  const fmtVal = (val) => formatCurrency(val, currency)
 
   useEffect(() => {
     supabase.from('cards')
@@ -1590,11 +1592,7 @@ function CollectionScreen({ user, initialGame, onClearFilter }) {
   const [dbError, setDbError] = useState('')
   const [currency, setCurrency] = useState(() => localStorage.getItem('gradedex_currency') || 'EUR')
 
-  function fmtVal(val) {
-    if (!val && val !== 0) return '—'
-    const converted = val * (EXCHANGE_RATES[currency] ?? 1)
-    return new Intl.NumberFormat('da-DK', { style: 'currency', currency, maximumFractionDigits: 2 }).format(converted)
-  }
+  const fmtVal = (val) => formatCurrency(val, currency)
 
   useEffect(() => {
     loadCards()
