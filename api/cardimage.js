@@ -1,4 +1,4 @@
-export const config = { maxDuration: 60 }
+export const config = { runtime: 'edge' }
 
 export default async function handler(req) {
   const { searchParams } = new URL(req.url)

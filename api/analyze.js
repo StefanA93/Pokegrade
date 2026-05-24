@@ -1,4 +1,4 @@
-export const config = { maxDuration: 60 }
+export const config = { runtime: 'edge' }
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY
 const SUPABASE_URL = process.env.SUPABASE_URL
@@ -140,7 +140,7 @@ async function _handler(req) {
   let anthropicRes
   try {
     const anthropicCtrl = new AbortController()
-    const anthropicTimer = setTimeout(() => anthropicCtrl.abort(), 20000)
+    const anthropicTimer = setTimeout(() => anthropicCtrl.abort(), 15000)
     anthropicRes = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -416,7 +416,7 @@ async function _handler(req) {
           const queryPtcg = async (q, size = 10) => {
             const url = `https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(q)}&orderBy=-set.releaseDate&pageSize=${size}&select=id,name,images,cardmarket,set,rarity,number,abilities,attacks,hp`
             const ctrl = new AbortController()
-            const timer = setTimeout(() => ctrl.abort(), 6000)
+            const timer = setTimeout(() => ctrl.abort(), 3000)
             try {
               const r = await fetch(url, { headers: ptcgHeaders, signal: ctrl.signal })
               clearTimeout(timer)
@@ -634,26 +634,12 @@ async function _handler(req) {
               debugInfo.ptcgQ = `name-only`
             }
 
-            // Pass 5: partial name (no quotes) — catches "Gothitelle ex", promos
-            if (!candidates.length) {
-              candidates = await queryPtcg(`name:${ptcgCardName.replace(/["\s]/g, '*')}`)
-              debugInfo.ptcgQ = `name-partial`
-            }
-
             // Pass 6: ability-only — last resort when name is OCR-misread (e.g. "Gochitelle" → "Gothitelle")
             if (!candidates.length && ability) {
               const allAbility = await queryPtcg(`abilities.name:"${ability.replace(/"/g, '')}"`, 20)
               candidates = eraOk(allAbility)
               if (!candidates.length) candidates = allAbility
               if (candidates.length) debugInfo.ptcgQ = `ability-only:${ability}`
-            }
-
-            // Pass 6b: attack-only — last resort when name is wrong and no ability
-            if (!candidates.length && attacks.length > 0) {
-              const allAttack = await queryPtcg(`attacks.name:"${attacks[0].replace(/"/g, '')}"`, 20)
-              candidates = eraOk(allAttack)
-              if (!candidates.length) candidates = allAttack
-              if (candidates.length) debugInfo.ptcgQ = `attack-only:${attacks[0]}`
             }
 
             debugInfo.ptcgCount = candidates.length
