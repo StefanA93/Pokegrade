@@ -518,6 +518,7 @@ async function _handler(req) {
             // with "Evolutions" (xy12, 2016). Override the set to me1 so Pass 0_direct targets
             // the correct set directly instead of wasting a lookup on the wrong set.
             let effectiveSetId = knownSetId
+            let megaHpOverride = false
             if (
               knownSetId &&
               /^xy/.test(knownSetId) &&
@@ -526,6 +527,7 @@ async function _handler(req) {
               parseInt(hp, 10) > 300
             ) {
               effectiveSetId = 'me1'
+              megaHpOverride = true
               debugInfo.megaHpSetOverride = `${knownSetId}→me1 (HP${hp}>300, Mega card)`
             }
 
@@ -672,7 +674,22 @@ async function _handler(req) {
             const scoreOk = ptcgScore !== undefined
               ? ptcgScore >= MIN_PTCG_SCORE
               : !isLatePass  // undefined score on late pass = no commit
-            if (best && scoreOk) {
+
+            // Set sanity gate: if AI gave a specific known set name, reject PTCG cards from a
+            // different set. Prevents e.g. committing me1-143 (Mega Evolution Helioptile IR) when
+            // AI clearly said "Obsidian Flames". megaHpOverride skips this — that override
+            // intentionally targets a different set than what the AI stated.
+            let ptcgSetOk = true
+            if (best && scoreOk && !megaHpOverride && normSet && !SERIES_NAMES.has(normSet) && best.set?.name) {
+              const bl = best.set.name.toLowerCase()
+              const nl = normSet.toLowerCase()
+              if (!bl.includes(nl) && !nl.includes(bl)) {
+                ptcgSetOk = false
+                debugInfo.ptcgSetMismatch = `${best.id}(${best.set.name})≠${normSet}`
+              }
+            }
+
+            if (best && scoreOk && ptcgSetOk) {
               let commitCard = best
               const aiSaysUltraRare = parsedFinish === 'Ultra Rare'
               const ptcgSaysPremium = /Special Illustration|Illustration Rare|Rare Rainbow/i.test(best.rarity || '')
@@ -746,7 +763,7 @@ async function _handler(req) {
               debugInfo.verified = `${verifiedRarity} · ${verifiedSetName} · #${verifiedNumber}`
               debugInfo.rarityDbg = `aiUR:${aiSaysUltraRare} ptcgPrem:${ptcgSaysPremium} urFb:${debugInfo.ptcgUrFallback || 'none'} → ${verifiedRarity}`
             } else if (best) {
-              debugInfo.ptcgSkipped = `skipped ${best.id}: score ${ptcgScore}%<${MIN_PTCG_SCORE}%`
+              debugInfo.ptcgSkipped = `skipped ${best.id}: ${!ptcgSetOk ? `set≠${normSet}` : `score ${ptcgScore}%<${MIN_PTCG_SCORE}%`}`
             }
           } catch (ptcgErr) {
             debugInfo.ptcgError = ptcgErr.message
