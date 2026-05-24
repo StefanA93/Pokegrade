@@ -1181,7 +1181,7 @@ function GradeResult({ result, game, frontImg, user, onSave }) {
             <span style={{ fontSize: 12, color: COLORS.muted }}>PSA Grading Fee</span>
             <span style={{ fontSize: 13, fontWeight: 700, color: COLORS.text }}>{result.gradingFee || '~25€'}</span>
           </div>
-          {result.catalogPriceEur && result.estimatedRawValue || result.estimatedPSAValue && (
+          {result.catalogPriceEur && (result.estimatedRawValue || result.estimatedPSAValue) && (
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 6 }}>
               <span style={{ fontSize: 12, color: COLORS.muted }}>AI Raw Est.</span>
               <span style={{ fontSize: 12, fontWeight: 600, color: `${COLORS.gold}cc` }}>{result.estimatedRawValue || result.estimatedPSAValue}</span>
