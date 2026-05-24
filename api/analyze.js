@@ -1059,7 +1059,7 @@ Known English set names (return these exactly): Scarlet & Violet, Paldea Evolved
 
 MEGA EVOLUTION vs EVOLUTIONS — CRITICAL DISTINCTION (extremely common confusion):
 - "Mega Evolution" (me1, 2025 SV era) and "Evolutions" (xy12, 2016 XY era) are COMPLETELY DIFFERENT sets with COMPLETELY DIFFERENT cards.
-- "Mega Evolution" (me1, 2025): Mega Pokémon with HP 330–400+. Card numbers go up to 132+ (e.g. 155/132). Ultra Rare Mega cards have silver ★★ symbol. Set name printed at bottom reads exactly "Mega Evolution".
+- "Mega Evolution" (me1, 2025): Mega Pokémon with HP 330–400+. Card numbers go up to 132 in main set, but Ultra Rare variants ARE numbered ABOVE set total (e.g. 155/132 — this is a SILVER ★★ Ultra Rare, NOT a SIR). Set name printed at bottom reads exactly "Mega Evolution".
 - "Evolutions" (xy12, 2016): Reprints of original Base Set cards. Mega Pokémon have HP 210–240 MAX. Card numbers go up to 108 (e.g. 002/108, 100/108). Set name printed at bottom reads exactly "Evolutions".
 - If you see a Mega Pokémon card with HP above 300 → it CANNOT be from "Evolutions" (xy12). It MUST be from "Mega Evolution" (me1) or another SV-era set. Do NOT default to "Evolutions" based on visual similarity.
 - CARD NUMBER must be read from the PHYSICAL card — NEVER inferred from memory or prior knowledge. If the card shows "155/132" → return "155/132". Do not substitute a number you recall from another version of the card.
@@ -1082,7 +1082,7 @@ STEP 1 — NUMBER ZONE CHECK (X/Y format only):
 STEP 2 — VISUAL IDENTIFICATION (use rarity symbol + artwork to confirm):
 ★★★ gold = Hyper Rare: Entire card is gold metallic including borders, text boxes, and artwork area.
 ★★ gold = Special Illustration Rare (SIR): GOLD ★★ symbol. Truly edge-to-edge full-bleed artwork — NO card frame, NO name box, NO attack text boxes visible anywhere. Pokémon name floats as tiny text directly over the illustration. Always an ex-Pokémon. ALWAYS numbered ABOVE set total (X > Y). Heavy etched ridged foil texture.
-★★ silver = Ultra Rare: SILVER ★★ symbol. Full Art ex card or Trainer Full Art — extended artwork, but the card RETAINS a visible frame: you can see the name box at the top, HP, attack text boxes, and/or energy costs. Numbered WITHIN set total (X < Y). DO NOT confuse with SIR — the card frame elements are still present and the number does not exceed the set total.
+★★ silver = Ultra Rare: SILVER ★★ symbol. Full Art ex card or Trainer Full Art — extended artwork, but the card RETAINS a visible frame: you can see the name box at the top, HP, attack text boxes, and/or energy costs. Usually numbered WITHIN set total (X < Y), BUT in "Mega Evolution" (me1) Ultra Rare cards ARE numbered above set total (e.g. 155/132). The ★★ COLOUR is the decisive factor — SILVER = Ultra Rare, GOLD = Special Illustration Rare. DO NOT confuse with SIR — the card frame elements are still present.
 ★ gold = Illustration Rare (IR): Artwork extends significantly beyond art box. Card name/HP area at the TOP retains partial standard frame. Always a non-ex Pokémon. Numbered WITHIN set total.
 ★★ black = Double Rare: Standard ex card layout with visible art box. Numbered in lower half of set.
 ★ black = Rare (Holo): Standard rectangular art box CLEARLY VISIBLE. Holofoil only inside art rectangle.
@@ -1093,7 +1093,7 @@ STEP 2 — VISUAL IDENTIFICATION (use rarity symbol + artwork to confirm):
 
 CRITICAL RULES:
 - SIR requires ALL of: GOLD ★★ symbol + edge-to-edge art + NO card frame visible + ex Pokémon + number ABOVE set total (X > Y) + no promo stamp
-- Ultra Rare: SILVER ★★ symbol + Full Art ex or Trainer Full Art + card frame elements still visible + ALWAYS numbered WITHIN set total (X < Y). If a Full Art ex card is numbered within the set (X < Y) → it is Ultra Rare, NOT SIR.
+- Ultra Rare: SILVER ★★ symbol + Full Art ex or Trainer Full Art + card frame elements still visible. Usually X < Y, but "Mega Evolution" (me1) Ultra Rares ARE above set total — ★★ colour is always the deciding factor. If ★★ is SILVER → Ultra Rare regardless of position.
 - IR requires: extended art + partial top frame + non-ex Pokémon + number within set total
 - A card with number WITHIN the set total (X < Y) CANNOT be SIR — it must be Ultra Rare or lower
 - Promo cards can look exactly like SIR — the promo stamp/code is the only difference
