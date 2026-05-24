@@ -410,7 +410,7 @@ async function _handler(req) {
           }
 
           const queryPtcg = async (q, size = 10) => {
-            const url = `https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(q)}&orderBy=-set.releaseDate&pageSize=${size}&select=id,images,cardmarket,set,rarity,number,abilities,attacks,hp`
+            const url = `https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(q)}&orderBy=-set.releaseDate&pageSize=${size}&select=id,name,images,cardmarket,set,rarity,number,abilities,attacks,hp`
             const ctrl = new AbortController()
             const timer = setTimeout(() => ctrl.abort(), 6000)
             try {
@@ -812,14 +812,25 @@ async function _handler(req) {
                 // Split each name variant into tokens, skip short/ambiguous tokens (≤2 chars like
                 // "M", "ex") and use the first meaningful word (e.g. "venusaur" from "M Venusaur-EX").
                 // This avoids "M" from "M Venusaur-EX" matching every card whose name contains "m".
-                const gurCHit = gurCHits.find(c => {
+                const matchesSpecies = c => {
                   const cName = (c.name || '').toLowerCase()
                   return gurNames.some(n => {
                     const tokens = n.toLowerCase().split(/[\s\-]+/)
                     const speciesToken = tokens.find(t => t.length >= 4)
                     return speciesToken ? cName.includes(speciesToken) : false
                   })
-                })
+                }
+                const speciesMatches = gurCHits.filter(matchesSpecies)
+                let gurCHit = null
+                if (speciesMatches.length) {
+                  if (/Ultra Rare|Full Art/i.test(_aiFinish || '')) {
+                    gurCHit = speciesMatches.find(c => /^Rare Ultra$/i.test(c.rarity || '')) || speciesMatches[0]
+                  } else if (/Special Illustration/i.test(_aiFinish || '')) {
+                    gurCHit = speciesMatches.find(c => /Special Illustration/i.test(c.rarity || '')) || speciesMatches[0]
+                  } else {
+                    gurCHit = speciesMatches[0]
+                  }
+                }
                 if (gurCHit) {
                   catalogId = gurCHit.id
                   officialImageUrl = gurCHit.images?.large || gurCHit.images?.small || null
