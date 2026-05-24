@@ -1193,7 +1193,12 @@ function GradeResult({ result, game, frontImg, user, onSave }) {
           <div style={{ fontWeight: 700, fontSize: 14, color: result.worthGrading ? COLORS.success : COLORS.danger, marginBottom: 6 }}>
             {result.worthGrading ? 'Recommended for PSA Grading' : 'Grading Not Recommended'}
           </div>
-          <div style={{ fontSize: 13, color: COLORS.muted, lineHeight: 1.5 }}>{result.recommendation}</div>
+          <div style={{ fontSize: 13, color: COLORS.muted, lineHeight: 1.5 }}>{
+            // If PTCG verified a different rarity, replace AI's wrong finish term in the text
+            (result.verifiedRarity && result.finish && result.verifiedRarity !== result.finish && result.recommendation)
+              ? result.recommendation.replace(new RegExp(result.finish.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), result.verifiedRarity)
+              : result.recommendation
+          }</div>
         </div>
 
         {/* Debug info — temporary */}
