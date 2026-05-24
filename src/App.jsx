@@ -1216,6 +1216,8 @@ function GradeResult({ result, game, frontImg, user, onSave }) {
             {result._debug.ptcgUrNumHit && <div style={{ color: COLORS.success, fontSize: 11 }}>UR num: {result._debug.ptcgUrNumHit}</div>}
             {result._debug.ptcgUrAbilityHit && <div style={{ color: COLORS.success, fontSize: 11 }}>UR ability: {result._debug.ptcgUrAbilityHit}</div>}
             {result._debug.ptcgGlobalUr && <div style={{ color: COLORS.success, fontSize: 11 }}>global-UR: {result._debug.ptcgGlobalUr}</div>}
+            {result._debug.megaHpSetOverride && <div style={{ color: '#f59e0b', fontSize: 11 }}>megaHP: {result._debug.megaHpSetOverride}</div>}
+            {result._debug.setFromHp && <div style={{ color: '#f59e0b', fontSize: 11 }}>setHP: {result._debug.setFromHp}</div>}
             {result._debug.gurCheck && <div style={{ color: '#94a3b8', fontSize: 11 }}>gurCheck: {result._debug.gurCheck}</div>}
             {result._debug.gurAttempt && <div style={{ color: '#a78bfa', fontSize: 11 }}>gur: {result._debug.gurAttempt} · A:{result._debug.gurCountA ?? '?'} B:{result._debug.gurCountB ?? '?'} C:{result._debug.gurCountC ?? '?'}{result._debug.gurError ? ` ❌${result._debug.gurError}` : ''}</div>}
             {result._debug.gurCIds && <div style={{ color: '#94a3b8', fontSize: 10 }}>gurC: {result._debug.gurCIds}</div>}

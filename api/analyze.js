@@ -165,6 +165,10 @@ export default async function handler(req) {
   let debugInfo = { cardName: matchedCard?.name || null, catalogHit: !!matchedCard?.id, source: matchedCard?.id ? 'embedding' : null }
   // Top-level AI finish — set once from parsed JSON, read at the end for safety override
   let _aiFinish = null
+  // Hoisted AI fields — needed after the try block for set-name inference
+  let _aiCardName = null
+  let _aiHp = null
+  let _aiAbility = null
 
   if (useGradingOnly && matchedCard?.name) {
     debugInfo.cardName = matchedCard.name
@@ -188,6 +192,9 @@ export default async function handler(req) {
       const hp = parsed.hp ? String(parsed.hp) : null
       const setEra = parsed.setEra || null
       _aiFinish = parsed.finish || null  // capture before any overrides, for safety net below
+      _aiCardName = cardName
+      _aiHp = hp
+      _aiAbility = ability
       debugInfo.cardName = cardName
       debugInfo.ability = ability
       debugInfo.hp = hp
@@ -482,21 +489,39 @@ export default async function handler(req) {
             // Pass 0_direct: exact set name → set.id lookup (most precise — skips fuzzy matching)
             // Only runs when AI returns a known specific set name (not a series name)
             const knownSetId = normSet ? SET_NAME_TO_ID[normSet] : null
-            if (knownSetId && ptcgCardName) {
+
+            // Mega Pokémon HP cross-validation (pokemon only):
+            // XY-era Mega cards top out at ~240 HP. If AI reads HP > 300 for a Mega Pokémon
+            // but mapped to an XY-era set ID, the AI has confused "Mega Evolution" (me1, SV 2025)
+            // with "Evolutions" (xy12, 2016). Override the set to me1 so Pass 0_direct targets
+            // the correct set directly instead of wasting a lookup on the wrong set.
+            let effectiveSetId = knownSetId
+            if (
+              knownSetId &&
+              /^xy/.test(knownSetId) &&
+              cardName &&
+              /^(Mega|M )\s/i.test(cardName) &&
+              parseInt(hp, 10) > 300
+            ) {
+              effectiveSetId = 'me1'
+              debugInfo.megaHpSetOverride = `${knownSetId}→me1 (HP${hp}>300, Mega card)`
+            }
+
+            if (effectiveSetId && ptcgCardName) {
               const rawNum = cardNumber?.split('/')?.[0]?.trim()
               const strippedNum = rawNum ? rawNum.replace(/^0+(?=\d)/, '') : null
               // set.id + number is a unique key — try WITHOUT name to bypass name-format issues
               if (rawNum) {
-                candidates = await queryPtcg(`set.id:${knownSetId} number:${rawNum}`, 1)
+                candidates = await queryPtcg(`set.id:${effectiveSetId} number:${rawNum}`, 1)
                 if (!candidates.length && strippedNum && strippedNum !== rawNum) {
-                  candidates = await queryPtcg(`set.id:${knownSetId} number:${strippedNum}`, 1)
+                  candidates = await queryPtcg(`set.id:${effectiveSetId} number:${strippedNum}`, 1)
                 }
-                if (candidates.length) debugInfo.ptcgQ = `setId+number:${knownSetId}#${rawNum}`
+                if (candidates.length) debugInfo.ptcgQ = `setId+number:${effectiveSetId}#${rawNum}`
               }
               // Fallback: name + set.id (broader, name-dependent)
               if (!candidates.length) {
-                candidates = await queryPtcg(`name:"${ptcgCardName}" set.id:${knownSetId}`, 10)
-                if (candidates.length) debugInfo.ptcgQ = `name+setId:${knownSetId}`
+                candidates = await queryPtcg(`name:"${ptcgCardName}" set.id:${effectiveSetId}`, 10)
+                if (candidates.length) debugInfo.ptcgQ = `name+setId:${effectiveSetId}`
               }
             }
 
@@ -765,10 +790,18 @@ export default async function handler(req) {
                 const gurCHits = await queryPtcg(`abilities.name:"${_gurAbility}"`, 20)
                 debugInfo.gurCountC = gurCHits.length
                 if (gurCHits.length) debugInfo.gurCIds = gurCHits.slice(0, 4).map(c => `${c.id}(${c.rarity})`).join(' ')
-                // Only commit if name roughly matches one of our name variants
-                const gurCHit = gurCHits.find(c =>
-                  gurNames.some(n => (c.name || '').toLowerCase().includes(n.toLowerCase().split(/[\s-]/)[0]))
-                )
+                // Only commit if the Pokémon species name matches.
+                // Split each name variant into tokens, skip short/ambiguous tokens (≤2 chars like
+                // "M", "ex") and use the first meaningful word (e.g. "venusaur" from "M Venusaur-EX").
+                // This avoids "M" from "M Venusaur-EX" matching every card whose name contains "m".
+                const gurCHit = gurCHits.find(c => {
+                  const cName = (c.name || '').toLowerCase()
+                  return gurNames.some(n => {
+                    const tokens = n.toLowerCase().split(/[\s\-]+/)
+                    const speciesToken = tokens.find(t => t.length >= 4)
+                    return speciesToken ? cName.includes(speciesToken) : false
+                  })
+                })
                 if (gurCHit) {
                   catalogId = gurCHit.id
                   officialImageUrl = gurCHit.images?.large || gurCHit.images?.small || null
@@ -906,6 +939,23 @@ export default async function handler(req) {
     debugInfo.rarityFromAi = 'Ultra Rare (no catalog match)'
   }
 
+  // When no catalog match but strong signals indicate Mega Evolution (me1, SV 2025):
+  // Mega card + HP > 300 + known ability = confidently set verifiedSetName so the display
+  // shows "Mega Evolution" even while the set is not yet indexed in pokemontcg.io.
+  // Only applies to Pokémon — other games don't have this signal set.
+  if (
+    game === 'pokemon' &&
+    !catalogId &&
+    _aiCardName &&
+    /^(Mega|M )\s/i.test(_aiCardName) &&
+    parseInt(_aiHp, 10) > 300 &&
+    _aiAbility &&
+    !verifiedSetName
+  ) {
+    verifiedSetName = 'Mega Evolution'
+    debugInfo.setFromHp = 'Mega Evolution (HP>300 + Mega card + ability)'
+  }
+
   debugInfo.aiFinish = _aiFinish
 
   // Log scan i Supabase
@@ -1007,6 +1057,13 @@ Known English set names (return these exactly): Scarlet & Violet, Paldea Evolved
 - Do NOT return a series name like "Scarlet & Violet Series" — return the exact product name.
 - If Japanese, unreadable, or uncertain → return null. NEVER guess.
 
+MEGA EVOLUTION vs EVOLUTIONS — CRITICAL DISTINCTION (extremely common confusion):
+- "Mega Evolution" (me1, 2025 SV era) and "Evolutions" (xy12, 2016 XY era) are COMPLETELY DIFFERENT sets with COMPLETELY DIFFERENT cards.
+- "Mega Evolution" (me1, 2025): Mega Pokémon with HP 330–400+. Card numbers go up to 132+ (e.g. 155/132). Ultra Rare Mega cards have silver ★★ symbol. Set name printed at bottom reads exactly "Mega Evolution".
+- "Evolutions" (xy12, 2016): Reprints of original Base Set cards. Mega Pokémon have HP 210–240 MAX. Card numbers go up to 108 (e.g. 002/108, 100/108). Set name printed at bottom reads exactly "Evolutions".
+- If you see a Mega Pokémon card with HP above 300 → it CANNOT be from "Evolutions" (xy12). It MUST be from "Mega Evolution" (me1) or another SV-era set. Do NOT default to "Evolutions" based on visual similarity.
+- CARD NUMBER must be read from the PHYSICAL card — NEVER inferred from memory or prior knowledge. If the card shows "155/132" → return "155/132". Do not substitute a number you recall from another version of the card.
+
 FINISH — Identify in this exact priority order:
 
 STEP 0 — PROMO CHECK (always first):
@@ -1044,7 +1101,7 @@ CRITICAL RULES:
 The card is assumed Near Mint — estimate market value at NM prices.
 
 ABILITY & ATTACKS & HP — Read these PHYSICALLY from the card image. Do NOT use prior knowledge or memory — the card in the image may differ from other cards with the same Pokémon name.
-- HP: the number printed in the TOP-RIGHT corner next to the damage counter icon. Read it exactly — Mega Evolution cards in SV era may have HP 350–400, not 220–230.
+- HP: the number printed in the TOP-RIGHT corner next to the damage counter icon. Read it EXACTLY as shown. Mega Pokémon in the SV-era "Mega Evolution" set have HP 330–400 (e.g. 380 HP). If you recall a Mega Pokémon having ~230 HP, you are thinking of the OLD XY-era "Evolutions" version — IGNORE that memory and read what is physically printed.
 - Ability name: the word(s) printed in BOLD immediately after "Ability:" above the ability description box. Read what is physically printed — do not recall or guess.
 - Attack names: printed in bold at the start of each attack line. Read each name exactly as printed.
 - If text is unclear, return null for that field — never substitute with memorized data.
