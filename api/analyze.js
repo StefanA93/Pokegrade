@@ -52,32 +52,32 @@ async function _handler(req) {
     return new Response(JSON.stringify({ error: 'Invalid session' }), { status: 401 })
   }
 
-  // Tjek scan-limit (30/dag for Pro, 3 lifetime for gratis)
+  // Tjek scan-limit (30/dag for Pro, 3 lifetime for gratis) — parallel for speed
   const today = new Date().toISOString().slice(0, 10)
-  const logsRes = await fetch(
-    `${SUPABASE_URL}/rest/v1/scan_logs?user_id=eq.${userId}&scan_date=eq.${today}&select=count`,
-    {
-      headers: {
-        Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
-        apikey: SUPABASE_SERVICE_KEY,
-        'Content-Type': 'application/json',
-        Prefer: 'count=exact'
+  const [logsRes, profileRes] = await Promise.all([
+    fetch(
+      `${SUPABASE_URL}/rest/v1/scan_logs?user_id=eq.${userId}&scan_date=eq.${today}&select=count`,
+      {
+        headers: {
+          Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
+          apikey: SUPABASE_SERVICE_KEY,
+          'Content-Type': 'application/json',
+          Prefer: 'count=exact'
+        }
       }
-    }
-  )
+    ),
+    fetch(
+      `${SUPABASE_URL}/rest/v1/profiles?id=eq.${userId}&select=is_pro,total_scans`,
+      {
+        headers: {
+          Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
+          apikey: SUPABASE_SERVICE_KEY
+        }
+      }
+    )
+  ])
   const countHeader = logsRes.headers.get('content-range')
   const dailyCount = countHeader ? parseInt(countHeader.split('/')[1] || '0') : 0
-
-  // Hent bruger-profil for at tjekke Pro-status og lifetime scans
-  const profileRes = await fetch(
-    `${SUPABASE_URL}/rest/v1/profiles?id=eq.${userId}&select=is_pro,total_scans`,
-    {
-      headers: {
-        Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
-        apikey: SUPABASE_SERVICE_KEY
-      }
-    }
-  )
   const profiles = await profileRes.json()
   const profile = profiles[0] || { is_pro: false, total_scans: 0 }
 
@@ -139,6 +139,8 @@ async function _handler(req) {
 
   let anthropicRes
   try {
+    const anthropicCtrl = new AbortController()
+    const anthropicTimer = setTimeout(() => anthropicCtrl.abort(), 20000)
     anthropicRes = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -150,10 +152,12 @@ async function _handler(req) {
         model: 'claude-sonnet-4-5',
         max_tokens: 1024,
         messages
-      })
+      }),
+      signal: anthropicCtrl.signal
     })
+    clearTimeout(anthropicTimer)
   } catch (e) {
-    return new Response(JSON.stringify({ error: 'AI service unavailable' }), { status: 502 })
+    return new Response(JSON.stringify({ error: 'AI service slow or unavailable — please try again' }), { status: 502 })
   }
 
   if (!anthropicRes.ok) {
