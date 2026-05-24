@@ -759,6 +759,30 @@ export default async function handler(req) {
                   debugInfo.ptcgGlobalUr = `GUR-B:${ability}→${gurBHit.id}`
                 }
               }
+              // Pass GUR-C: ability only, NO rarity constraint — finds card even if rarity is
+              // stored differently in pokemontcg.io (e.g. me1 set uses different rarity strings)
+              if (!catalogId) {
+                const gurCHits = await queryPtcg(`abilities.name:"${_gurAbility}"`, 20)
+                debugInfo.gurCountC = gurCHits.length
+                if (gurCHits.length) debugInfo.gurCIds = gurCHits.slice(0, 4).map(c => `${c.id}(${c.rarity})`).join(' ')
+                // Only commit if name roughly matches one of our name variants
+                const gurCHit = gurCHits.find(c =>
+                  gurNames.some(n => (c.name || '').toLowerCase().includes(n.toLowerCase().split(/[\s-]/)[0]))
+                )
+                if (gurCHit) {
+                  catalogId = gurCHit.id
+                  officialImageUrl = gurCHit.images?.large || gurCHit.images?.small || null
+                  catalogPriceEur = gurCHit.cardmarket?.prices?.averageSellPrice || null
+                  catalogCardmarketUrl = gurCHit.cardmarket?.url || null
+                  debugInfo.catalogHit = true
+                  debugInfo.source = 'ptcg-global-ur'
+                  verifiedRarity = /^Rare Ultra$/i.test(gurCHit.rarity || '') ? 'Rare Ultra' : (gurCHit.rarity || null)
+                  verifiedSetName = gurCHit.set?.name || null
+                  verifiedNumber = gurCHit.number || null
+                  debugInfo.verified = `${verifiedRarity} · ${verifiedSetName} · #${verifiedNumber}`
+                  debugInfo.ptcgGlobalUr = `GUR-C:${_gurAbility}→${gurCHit.id}`
+                }
+              }
             } catch (gurErr) {
               debugInfo.gurError = gurErr.message
             }
