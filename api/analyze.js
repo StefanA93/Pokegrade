@@ -702,6 +702,37 @@ export default async function handler(req) {
           } catch (ptcgErr) {
             debugInfo.ptcgError = ptcgErr.message
           }
+
+          // Global UR recovery: fires when all set-constrained PTCG passes failed (or were score-gated)
+          // and AI says Ultra Rare with a known ability.
+          // Core problem: AI misidentifies the set (e.g. "Evolutions" instead of "Mega Evolution")
+          // → knownSetId targets wrong set → number/name/ability searches all miss the real card.
+          // This bypass searches globally without set constraint: ability + name + rarity:"Rare Ultra".
+          if (!catalogId && _aiFinish === 'Ultra Rare' && ability) {
+            try {
+              const gurNames = [...new Set([ptcgCardName, svExName, cardName, megaSvExName].filter(Boolean))]
+              for (const n of gurNames) {
+                if (catalogId) break
+                const gurHits = await queryPtcg(
+                  `abilities.name:"${ability.replace(/"/g, '')}" name:"${n}" rarity:"Rare Ultra"`, 5
+                )
+                const gurHit = gurHits.find(c => /^Rare Ultra$/i.test(c.rarity || ''))
+                if (gurHit) {
+                  catalogId = gurHit.id
+                  officialImageUrl = gurHit.images?.large || gurHit.images?.small || null
+                  catalogPriceEur = gurHit.cardmarket?.prices?.averageSellPrice || null
+                  catalogCardmarketUrl = gurHit.cardmarket?.url || null
+                  debugInfo.catalogHit = true
+                  debugInfo.source = 'ptcg-global-ur'
+                  verifiedRarity = 'Rare Ultra'
+                  verifiedSetName = gurHit.set?.name || null
+                  verifiedNumber = gurHit.number || null
+                  debugInfo.verified = `${verifiedRarity} · ${verifiedSetName} · #${verifiedNumber}`
+                  debugInfo.ptcgGlobalUr = `${n}+${ability}→${gurHit.id}`
+                }
+              }
+            } catch { /* silent */ }
+          }
         }
 
         // Strategy Promo: when finish is Promo, search directly in promo sets (svp*, swshp*, etc.)

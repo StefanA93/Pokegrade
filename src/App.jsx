@@ -1213,6 +1213,7 @@ function GradeResult({ result, game, frontImg, user, onSave }) {
             {result._debug.rarityDbg && <div style={{ color: '#a78bfa', fontSize: 11 }}>rarity: {result._debug.rarityDbg}</div>}
             {result._debug.ptcgUrNumHit && <div style={{ color: COLORS.success, fontSize: 11 }}>UR num: {result._debug.ptcgUrNumHit}</div>}
             {result._debug.ptcgUrAbilityHit && <div style={{ color: COLORS.success, fontSize: 11 }}>UR ability: {result._debug.ptcgUrAbilityHit}</div>}
+            {result._debug.ptcgGlobalUr && <div style={{ color: COLORS.success, fontSize: 11 }}>global-UR: {result._debug.ptcgGlobalUr}</div>}
             {result._debug.numNorm && <div style={{ color: '#e67e22', fontSize: 11 }}>numNorm: {result._debug.numNorm}</div>}
             {result._debug.ptcgSkipped && <div style={{ color: '#e67e22', fontSize: 11 }}>{result._debug.ptcgSkipped}</div>}
             {result._debug.ptcgStatus && <div style={{ color: '#e67e22' }}>ptcg HTTP {result._debug.ptcgStatus} (Vercel IP blokeret?)</div>}
