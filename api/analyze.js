@@ -853,6 +853,20 @@ export default async function handler(req) {
     debugInfo.error = e.message
   }
 
+  // SUPABASE RARITY SANITY: if Supabase committed a card whose rarity contradicts the AI,
+  // revert the commit. Prevents xy12-2 (Rare Holo EX) from being committed when AI says Ultra Rare.
+  // Only applies to Supabase strategies (s1-s5b), not PTCG (which has its own scoring).
+  if (catalogId && /^s\d/.test(debugInfo.source || '') && _aiFinish) {
+    const _aiPremium = /Ultra Rare|Special Illustration|Illustration Rare|Rare Rainbow|Hyper Rare|Full Art|Double Rare|Secret Rare|Shiny|Amazing|Radiant|Prism/i.test(_aiFinish)
+    const _dbPremium = !verifiedRarity || /Ultra Rare|Special Illustration|Illustration Rare|Rare Rainbow|Hyper Rare|Full Art|Double Rare|Secret Rare|Shiny|Amazing|Radiant|Prism/i.test(verifiedRarity)
+    if (_aiPremium && !_dbPremium) {
+      debugInfo.supabaseReverted = `${debugInfo.source}(${verifiedRarity}) reverted: AI=${_aiFinish}`
+      catalogId = null; officialImageUrl = null; catalogPriceEur = null; catalogCardmarketUrl = null
+      verifiedRarity = null; verifiedSetName = null; verifiedNumber = null
+      debugInfo.catalogHit = false; debugInfo.source = null
+    }
+  }
+
   // TOP-LEVEL SAFETY OVERRIDE: if AI identified Ultra Rare but catalog returned SIR/IR,
   // trust the AI. The rarity symbol (silver vs gold ★★) is visually unambiguous.
   // This catches cases where the UR variant search accepted a wrong card or failed silently.
@@ -861,6 +875,13 @@ export default async function handler(req) {
     verifiedRarity = 'Rare Ultra'
     debugInfo.rarityForcedUR = `${_prevRarity} → Rare Ultra (AI said Ultra Rare)`
   }
+
+  // If AI says Ultra Rare and no catalog matched, set verifiedRarity from AI so display is correct.
+  if (!catalogId && /Ultra Rare/i.test(_aiFinish || '')) {
+    verifiedRarity = 'Rare Ultra'
+    debugInfo.rarityFromAi = 'Ultra Rare (no catalog match)'
+  }
+
   debugInfo.aiFinish = _aiFinish
 
   // Log scan i Supabase
