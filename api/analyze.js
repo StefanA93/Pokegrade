@@ -1056,6 +1056,7 @@ Return ONLY valid JSON, no markdown, no extra text:
   "mainIssues": ["<specific defect if any>"],
   "worthGrading": <true|false>,
   "estimatedRawValue": "<UNGRADED raw market price in EUR for NM condition — raw (unslabbed) NM copy price TODAY, not a PSA graded price>",
+  "estimatedPSAValue": "<same as estimatedRawValue — copy the same raw NM price here>",
   "gradingFee": "~25€",
   "recommendation": "<short actionable recommendation in English>"
 }`
@@ -1155,6 +1156,7 @@ Return ONLY valid JSON, no markdown, no extra text:
   "mainIssues": ["<issue if any>"],
   "worthGrading": <true|false>,
   "estimatedRawValue": "<UNGRADED raw market price in EUR for NM condition — the price a collector pays for a raw (unslabbed) NM copy TODAY, e.g. 40-60€. Do NOT estimate a PSA 9 or PSA 10 graded price — raw only>",
+  "estimatedPSAValue": "<same as estimatedRawValue — copy the same raw NM price here>",
   "gradingFee": "~25€",
   "recommendation": "<short recommendation in English>"
 }`

@@ -952,7 +952,7 @@ function GradeResult({ result, game, frontImg, user, onSave }) {
     }
 
     // Prefer catalog EUR price; fall back to parsing AI estimate string "40-65€" → avg
-    const valueStr = result.estimatedRawValue || ''
+    const valueStr = result.estimatedRawValue || result.estimatedPSAValue || ''
     const nums = [...valueStr.matchAll(/\d+/g)].map(m => parseFloat(m[0]))
     const parsedValueNum = nums.length >= 2 ? (nums[0] + nums[1]) / 2 : nums[0] || null
     const valueNum = result.catalogPriceEur || parsedValueNum || null
@@ -964,7 +964,7 @@ function GradeResult({ result, game, frontImg, user, onSave }) {
       grade: 7,
       finish: result.verifiedRarity || result.finish || null,
       value: valueNum,
-      price_range: result.estimatedRawValue || null,
+      price_range: result.estimatedRawValue || result.estimatedPSAValue || null,
       image_url: result.officialImageUrl || imageUrl,
       notes: result.recommendation,
       card_number: result.verifiedNumber || result.cardNumber || null,
@@ -1160,7 +1160,7 @@ function GradeResult({ result, game, frontImg, user, onSave }) {
               <div style={{ fontSize: 28, fontWeight: 700, color: COLORS.gold, fontFamily: FONT_VALUE, letterSpacing: -0.5, lineHeight: 1 }}>
                 {result.catalogPriceEur
                   ? new Intl.NumberFormat('da-DK', { style: 'currency', currency: 'EUR' }).format(result.catalogPriceEur)
-                  : (result.estimatedRawValue || '—')
+                  : (result.estimatedRawValue || result.estimatedPSAValue || '—')
                 }
               </div>
             </div>
@@ -1181,10 +1181,10 @@ function GradeResult({ result, game, frontImg, user, onSave }) {
             <span style={{ fontSize: 12, color: COLORS.muted }}>PSA Grading Fee</span>
             <span style={{ fontSize: 13, fontWeight: 700, color: COLORS.text }}>{result.gradingFee || '~25€'}</span>
           </div>
-          {result.catalogPriceEur && result.estimatedRawValue && (
+          {result.catalogPriceEur && result.estimatedRawValue || result.estimatedPSAValue && (
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 6 }}>
               <span style={{ fontSize: 12, color: COLORS.muted }}>AI Raw Est.</span>
-              <span style={{ fontSize: 12, fontWeight: 600, color: `${COLORS.gold}cc` }}>{result.estimatedRawValue}</span>
+              <span style={{ fontSize: 12, fontWeight: 600, color: `${COLORS.gold}cc` }}>{result.estimatedRawValue || result.estimatedPSAValue}</span>
             </div>
           )}
         </div>
