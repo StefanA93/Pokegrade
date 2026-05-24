@@ -711,6 +711,7 @@ export default async function handler(req) {
           // Trigger GUR for any premium finish — AI inconsistently calls same card
           // "Ultra Rare", "Secret Rare", "Full Art" etc. depending on scan quality.
           const _gurPremium = _aiFinish && /Ultra Rare|Secret Rare|Special Illustration|Illustration Rare|Rare Rainbow|Hyper Rare|Full Art|Double Rare/i.test(_aiFinish)
+          debugInfo.gurCheck = `cat:${catalogId ? 'set' : 'null'} fin:${_aiFinish || 'null'} ab:${ability ? 'set' : 'null'} gp:${String(!!_gurPremium)}`
           if (!catalogId && _gurPremium && ability) {
             const _gurAbility = ability.replace(/"/g, '')
             const gurNames = [...new Set([ptcgCardName, svExName, cardName, megaSvExName].filter(Boolean))]
