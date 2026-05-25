@@ -313,7 +313,10 @@ async function _handler(req) {
         const gameFilter = `game=eq.${encodeURIComponent(game)}`
         const nameFilter = `name=ilike.${encodeURIComponent(cardName)}`
         // Exclude Japanese-only set IDs (rsv* = Japanese SV reprints) from Supabase lookups
-        const langFilter = game === 'pokemon' ? '&set_id=not.like.rsv*' : ''
+        // Exclude Japanese SV reprint sets (rsv1, rsv2 … rsv99) from Supabase lookups.
+        // rsv_ = 1-char suffix (rsv1–rsv9), rsv__ = 2-char suffix (rsv10–rsv99).
+        // White Flare (rsv10pt5) is English and has a longer suffix — NOT excluded.
+        const langFilter = game === 'pokemon' ? '&set_id=not.like.rsv_&set_id=not.like.rsv__' : ''
 
         // Map AI finish → pokemontcg.io rarity query term
         const finishRarityQuery = {
@@ -361,34 +364,40 @@ async function _handler(req) {
             'Diamond & Pearl': 'dp1',
           }
           // Exact set name → pokemontcg.io set ID — enables direct set.id lookup (most precise)
+          // IDs verified against pokemontcg.io API (printedTotal = Y in X/Y on physical card).
           const SET_NAME_TO_ID = {
             // Scarlet & Violet
-            'Scarlet & Violet': 'sv1', 'Paldea Evolved': 'sv2', 'Obsidian Flames': 'sv3',
+            'Scarlet & Violet': 'sv1',   'Paldea Evolved': 'sv2',    'Obsidian Flames': 'sv3',
             'Scarlet & Violet 151': 'sv3pt5', '151': 'sv3pt5',
-            'Paradox Rift': 'sv4', 'Paldean Fates': 'sv4pt5',
-            'Temporal Forces': 'sv5', 'Twilight Masquerade': 'sv6',
-            'Shrouded Fable': 'sv6pt5', 'Stellar Crown': 'sv7',
-            'Surging Sparks': 'sv8', 'Prismatic Evolutions': 'sv8pt5',
-            'Destined Rivals': 'sv9', 'Black Bolt': 'sv10', 'White Flare': 'sv10',
+            'Paradox Rift': 'sv4',        'Paldean Fates': 'sv4pt5',
+            'Temporal Forces': 'sv5',     'Twilight Masquerade': 'sv6',
+            'Shrouded Fable': 'sv6pt5',   'Stellar Crown': 'sv7',
+            'Surging Sparks': 'sv8',      'Prismatic Evolutions': 'sv8pt5',
+            'Journey Together': 'sv9',    'Destined Rivals': 'sv10',
+            'Black Bolt': 'zsv10pt5',     'White Flare': 'rsv10pt5',
             // Sword & Shield
-            'Sword & Shield': 'swsh1', 'Rebel Clash': 'swsh2', 'Darkness Ablaze': 'swsh3',
-            'Vivid Voltage': 'swsh4', 'Battle Styles': 'swsh5', 'Chilling Reign': 'swsh6',
-            'Evolving Skies': 'swsh7', 'Fusion Strike': 'swsh8', 'Brilliant Stars': 'swsh9',
-            'Astral Radiance': 'swsh10', 'Lost Origin': 'swsh11', 'Silver Tempest': 'swsh12',
+            'Sword & Shield': 'swsh1',   'Rebel Clash': 'swsh2',    'Darkness Ablaze': 'swsh3',
+            'Vivid Voltage': 'swsh4',    'Battle Styles': 'swsh5',   'Chilling Reign': 'swsh6',
+            'Evolving Skies': 'swsh7',   'Fusion Strike': 'swsh8',   'Brilliant Stars': 'swsh9',
+            'Astral Radiance': 'swsh10', 'Lost Origin': 'swsh11',    'Silver Tempest': 'swsh12',
             'Crown Zenith': 'swsh12pt5',
             // Sun & Moon
-            'Sun & Moon': 'sm1', 'Guardians Rising': 'sm2', 'Burning Shadows': 'sm3',
-            'Shining Legends': 'sm3pt5', 'Crimson Invasion': 'sm4', 'Ultra Prism': 'sm5',
-            'Forbidden Light': 'sm6', 'Celestial Storm': 'sm7', 'Dragon Majesty': 'sm7a',
-            'Lost Thunder': 'sm8', 'Team Up': 'sm9', 'Unbroken Bonds': 'sm10',
-            'Unified Minds': 'sm11', 'Cosmic Eclipse': 'sm12',
+            'Sun & Moon': 'sm1',         'Guardians Rising': 'sm2',  'Burning Shadows': 'sm3',
+            'Shining Legends': 'sm3pt5', 'Crimson Invasion': 'sm4',  'Ultra Prism': 'sm5',
+            'Forbidden Light': 'sm6',    'Celestial Storm': 'sm7',   'Dragon Majesty': 'sm7a',
+            'Lost Thunder': 'sm8',       'Team Up': 'sm9',           'Unbroken Bonds': 'sm10',
+            'Unified Minds': 'sm11',     'Cosmic Eclipse': 'sm12',
             // XY
-            'XY': 'xy1', 'Flashfire': 'xy2', 'Furious Fists': 'xy3', 'Phantom Forces': 'xy4',
-            'Primal Clash': 'xy5', 'Roaring Skies': 'xy6', 'Ancient Origins': 'xy7',
-            'BREAKthrough': 'xy8', 'BREAKpoint': 'xy9', 'Fates Collide': 'xy10',
-            'Steam Siege': 'xy11', 'Evolutions': 'xy12',
-            // Mega Evolution (2025 SV-era Mega Pokémon set)
-            'Mega Evolution': 'me1',
+            'XY': 'xy1',            'Flashfire': 'xy2',     'Furious Fists': 'xy3',
+            'Phantom Forces': 'xy4','Primal Clash': 'xy5',  'Roaring Skies': 'xy6',
+            'Ancient Origins': 'xy7','BREAKthrough': 'xy8', 'BREAKpoint': 'xy9',
+            'Fates Collide': 'xy10','Steam Siege': 'xy11',  'Evolutions': 'xy12',
+            // Mega Evolution era (SV 2025–2026)
+            'Mega Evolution': 'me1',       // printedTotal 132
+            'Phantasmal Flames': 'me2',    // printedTotal  94  (set code PFL EN)
+            'Ascended Heroes': 'me2pt5',   // printedTotal 217
+            'Perfect Order': 'me3',        // printedTotal  88
+            'Chaos Rising': 'me4',         // printedTotal  86
           }
 
           debugInfo.hasApiKey = !!PTCG_API_KEY
@@ -434,7 +443,9 @@ async function _handler(req) {
             if (!cards.length) return null
             const englishCards = cards.filter(c => {
               const sid = c.set?.id || ''
-              return !sid.startsWith('rsv') && !sid.startsWith('svsv') && c.set?.series !== 'Japanese'
+              // Exclude Japanese SV reprint sets (rsv1–rsv99) but ALLOW rsv10pt5 (White Flare, English).
+              // Japanese rsv IDs are rsv + 1–2 digits only. White Flare = rsv10pt5 (has 'pt5' suffix).
+              return !/^rsv\d{1,2}$/.test(sid) && !sid.startsWith('svsv') && c.set?.series !== 'Japanese'
             })
             if (!englishCards.length) return null
             let pool = englishCards
@@ -530,9 +541,9 @@ async function _handler(req) {
 
             // Mega Pokémon HP cross-validation (pokemon only):
             // XY-era Mega cards top out at ~240 HP. If AI reads HP > 300 for a Mega Pokémon
-            // but mapped to an XY-era set ID, the AI has confused "Mega Evolution" (me1, SV 2025)
-            // with "Evolutions" (xy12, 2016). Override the set to me1 so Pass 0_direct targets
-            // the correct set directly instead of wasting a lookup on the wrong set.
+            // but mapped to an XY-era set ID, it confused a Mega Evolution era set with "Evolutions"
+            // (xy12, 2016). Override the set to me1 as the most likely Mega Evolution set.
+            // The denominator cross-check below may further refine to me2/me3/me4 if applicable.
             let effectiveSetId = knownSetId
             let megaHpOverride = false
             if (
@@ -544,14 +555,52 @@ async function _handler(req) {
             ) {
               effectiveSetId = 'me1'
               megaHpOverride = true
-              debugInfo.megaHpSetOverride = `${knownSetId}→me1 (HP${hp}>300, Mega card)`
+              debugInfo.megaHpSetOverride = `${knownSetId}→me1 (HP${hp}>300, Mega card — denom check may refine)`
+            }
+
+            // Denominator uniqueness cross-check:
+            // If Claude reads a denominator that UNIQUELY identifies set X, but the AI's
+            // stated set name points to set Y (X≠Y), the card number was almost certainly
+            // hallucinated on heavy foil. Flag it so number-based passes are skipped —
+            // name + set.id is always more reliable than a hallucinated number.
+            // printedTotal values verified via pokemontcg.io API.
+            // Only include denominators that are globally unique across all English sets.
+            // Shared denominators (182=sv4=sv10, 162=sv5=xy8, 159=sv9=swsh12pt5, etc.) are excluded.
+            const UNIQUE_DENOM_TO_SET = {
+              '165': 'sv3pt5',  // 151            — unique (no other EN set has 165 base)
+              '193': 'sv2',     // Paldea Evolved  — unique
+              '197': 'sv3',     // Obsidian Flames — unique
+              '091': 'sv4pt5',  // Paldean Fates   — unique
+              '167': 'sv6',     // Twilight Masquerade — unique
+              '064': 'sv6pt5',  // Shrouded Fable  — unique in modern era
+              '142': 'sv7',     // Stellar Crown   — unique
+              '191': 'sv8',     // Surging Sparks  — unique
+              '132': 'me1',     // Mega Evolution  — unique
+              '094': 'me2',     // Phantasmal Flames (PFL) — unique in modern era
+              '217': 'me2pt5',  // Ascended Heroes — unique
+              '088': 'me3',     // Perfect Order   — unique
+            }
+            const _cardDenom = cardNumber?.split('/')?.[1]?.trim()?.replace(/\D/g, '')
+            const _denomImpliedSet = _cardDenom ? UNIQUE_DENOM_TO_SET[_cardDenom] : null
+            const numberSuspect = !!(_denomImpliedSet && knownSetId && _denomImpliedSet !== knownSetId)
+            if (numberSuspect) {
+              // Denominator is harder to confabulate than a set name — use it to correct the wrong set
+              debugInfo.numSuspect = `denom:${_cardDenom}→${_denomImpliedSet}≠${knownSetId} (foil hallucination — using denom set)`
+              effectiveSetId = _denomImpliedSet
+            }
+            // If set name unknown but denominator uniquely identifies a set, use that as the anchor
+            if (!effectiveSetId && _denomImpliedSet) {
+              effectiveSetId = _denomImpliedSet
+              debugInfo.setIdFromDenom = `denom-only:${_cardDenom}→${_denomImpliedSet}`
             }
 
             if (effectiveSetId && ptcgCardName) {
               const rawNum = cardNumber?.split('/')?.[0]?.trim()
               const strippedNum = rawNum ? rawNum.replace(/^0+(?=\d)/, '') : null
               // set.id + number is a unique key — try WITHOUT name to bypass name-format issues
-              if (rawNum) {
+              // Skip when numberSuspect: denominator cross-check flagged the number as hallucinated.
+              // Fall through to name+setId search which uses the more reliable set-name reading.
+              if (rawNum && !numberSuspect) {
                 candidates = await queryPtcg(`set.id:${effectiveSetId} number:${rawNum}`, 1)
                 if (!candidates.length && strippedNum && strippedNum !== rawNum) {
                   candidates = await queryPtcg(`set.id:${effectiveSetId} number:${strippedNum}`, 1)
@@ -618,7 +667,8 @@ async function _handler(req) {
 
             // Pass 0c: card number — most precise single-card identifier
             // Run BEFORE ability/attack so a specific number (e.g. 100/108) beats a shared ability
-            if (!candidates.length && cardNumber) {
+            // Skip when numberSuspect: the number was flagged as likely hallucinated on foil
+            if (!candidates.length && cardNumber && !numberSuspect) {
               const rawNum = cardNumber.split('/')[0].trim()
               const strippedNum = rawNum.replace(/^0+(?=\d)/, '')
               // Try all name variants: normalized, SV abbreviated ex, original, SV full Mega ex
@@ -722,7 +772,7 @@ async function _handler(req) {
             // AI clearly said "Obsidian Flames". megaHpOverride skips this — that override
             // intentionally targets a different set than what the AI stated.
             let ptcgSetOk = true
-            if (best && scoreOk && !megaHpOverride && normSet && !SERIES_NAMES.has(normSet) && best.set?.name) {
+            if (best && scoreOk && !megaHpOverride && !numberSuspect && normSet && !SERIES_NAMES.has(normSet) && best.set?.name) {
               const bl = best.set.name.toLowerCase()
               const nl = normSet.toLowerCase()
               if (!bl.includes(nl) && !nl.includes(bl)) {
@@ -1164,16 +1214,27 @@ CARD NUMBER — CRITICAL: The second image is an enlarged crop of the bottom of 
 - The denominator is ALWAYS a plain number. It never contains letters. If you see letters in the denominator, strip them.
 - Promo cards: standalone code without "/" (e.g. "SVP EN 113", "SWSH052", "XY123") → return exactly as-is and set finish = Promo
 - Return null ONLY if completely unreadable
+- ⚠️ DO NOT HALLUCINATE NUMBERS: On Hyper Rare, Illustration Rare, Rainbow Rare, and other premium foil cards, the card number is printed over heavy holographic foil — individual digits may be nearly invisible. Read what you can LITERALLY SEE on THIS specific card. Never output a number you recall from memory about this card type (e.g. if you know Switch appears as 206/165 in the 151 set, do NOT write those digits unless you can physically read them here). A null is always better than a recalled-but-wrong number that causes misidentification.
 
 SET NAME — CRITICAL: Read the SPECIFIC set name from the small text at the very bottom of the card.
-Known English set names (return these exactly): Scarlet & Violet, Paldea Evolved, Obsidian Flames, 151, Paradox Rift, Paldean Fates, Temporal Forces, Twilight Masquerade, Shrouded Fable, Stellar Crown, Surging Sparks, Prismatic Evolutions, Destined Rivals, Mega Evolution, Brilliant Stars, Astral Radiance, Lost Origin, Silver Tempest, Crown Zenith, Evolving Skies, Fusion Strike, Chilling Reign, Battle Styles, Rebel Clash, Vivid Voltage, Darkness Ablaze, Evolutions.
+Known English set names (return these exactly):
+Scarlet & Violet era: Scarlet & Violet, Paldea Evolved, Obsidian Flames, 151, Paradox Rift, Paldean Fates, Temporal Forces, Twilight Masquerade, Shrouded Fable, Stellar Crown, Surging Sparks, Prismatic Evolutions, Journey Together, Destined Rivals, Black Bolt, White Flare.
+Mega Evolution era: Mega Evolution, Phantasmal Flames, Ascended Heroes, Perfect Order, Chaos Rising.
+Sword & Shield era: Brilliant Stars, Astral Radiance, Lost Origin, Silver Tempest, Crown Zenith, Evolving Skies, Fusion Strike, Chilling Reign, Battle Styles, Rebel Clash, Vivid Voltage, Darkness Ablaze.
+XY era: Evolutions, Steam Siege, Fates Collide, BREAKpoint, BREAKthrough, Ancient Origins, Roaring Skies, Primal Clash, Phantom Forces, Furious Fists, Flashfire.
 - Do NOT return a series name like "Scarlet & Violet Series" — return the exact product name.
 - If Japanese, unreadable, or uncertain → return null. NEVER guess.
+- The set name is printed in plain readable text and is FAR MORE RELIABLE than the card number on premium foil cards. Prioritize reading the set name accurately — it is the single most important field for correct identification.
 
 MEGA EVOLUTION vs EVOLUTIONS — CRITICAL DISTINCTION (extremely common confusion):
 - "Mega Evolution" (me1, 2025 SV era) and "Evolutions" (xy12, 2016 XY era) are COMPLETELY DIFFERENT sets with COMPLETELY DIFFERENT cards.
 - "Mega Evolution" (me1, 2025): Mega Pokémon with HP 330–400+. Card numbers go up to 132 in main set, but Ultra Rare variants ARE numbered ABOVE set total (e.g. 155/132 — this is a SILVER ★★ Ultra Rare, NOT a SIR). Set name printed at bottom reads exactly "Mega Evolution".
 - "Evolutions" (xy12, 2016): Reprints of original Base Set cards. Mega Pokémon have HP 210–240 MAX. Card numbers go up to 108 (e.g. 002/108, 100/108). Set name printed at bottom reads exactly "Evolutions".
+- "Phantasmal Flames" (me2, nov 2025): The SECOND Mega Evolution set. Set code: "PFL EN". 94 base cards (denominator 094). Ultra Rare Trainer/Pokémon cards numbered ABOVE set total (e.g. Switch 123/094).
+- "Ascended Heroes" (me2pt5, jan 2026): THIRD Mega Evolution set (special). Set code: "ASC EN". 217 base cards (denominator 217). Large special set like Prismatic Evolutions.
+- "Perfect Order" (me3, mar 2026): FOURTH Mega Evolution set. Set code: "POR EN". 88 base cards (denominator 088).
+- "Chaos Rising" (me4, may 2026): FIFTH Mega Evolution set. Set code: "CRI EN". 86 base cards (denominator 086).
+For ALL Mega Evolution era sets (me1–me4): Mega Pokémon have HP 330–400+. Ultra Rare cards (★★ silver) ARE numbered above set total.
 - If you see a Mega Pokémon card with HP above 300 → it CANNOT be from "Evolutions" (xy12). It MUST be from "Mega Evolution" (me1) or another SV-era set. Do NOT default to "Evolutions" based on visual similarity.
 - CARD NUMBER must be read from the PHYSICAL card — NEVER inferred from memory or prior knowledge. If the card shows "155/132" → return "155/132". Do not substitute a number you recall from another version of the card.
 
