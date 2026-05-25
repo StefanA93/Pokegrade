@@ -77,6 +77,7 @@ const GAMES = [
 
 const STRIPE_URL = 'https://buy.stripe.com/REPLACE_WITH_YOUR_STRIPE_LINK'
 const FONT_VALUE = "'Space Grotesk', system-ui, sans-serif"
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001'
 
 const COLORS = {
   bg: '#06060a',
@@ -662,6 +663,7 @@ function ScanScreen({ user, profile, onScanDone, modelState, modelProgress }) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [result, setResult] = useState(null)
+  const [scanMode, setScanMode] = useState('free') // 'free' | 'ai'
   const [camera, setCamera] = useState(null) // 'front' | 'back' | null
   const [logoErrs, setLogoErrs] = useState({})
   const frontRef = useRef()
@@ -710,6 +712,38 @@ function ScanScreen({ user, profile, onScanDone, modelState, modelProgress }) {
       img.onerror = () => resolve(null)
       img.src = dataUrl
     })
+  }
+
+  async function freeScan() {
+    if (!frontImg) { setError('Upload the front of the card first'); return }
+    setLoading(true); setError('')
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const token = session?.access_token
+      if (!token) { setError('Not signed in — please reload'); setLoading(false); return }
+
+      const blob = await fetch(frontImg).then(r => r.blob())
+      const formData = new FormData()
+      formData.append('file', blob, 'card.jpg')
+
+      const res = await fetch(`${API_URL}/api/v1/scan?game=${game}`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+      })
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error(err.error?.message || `Server error ${res.status}`)
+      }
+
+      const data = await res.json()
+      setResult({ type: 'free', ...data })
+    } catch (e) {
+      setError(e.message || 'Free scan failed — is the server running?')
+    } finally {
+      setLoading(false)
+    }
   }
 
   async function analyze() {
@@ -804,12 +838,34 @@ function ScanScreen({ user, profile, onScanDone, modelState, modelProgress }) {
       <input ref={frontRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={e => handleFile(e, 'front')} />
       <input ref={backRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={e => handleFile(e, 'back')} />
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, paddingTop: 8 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, paddingTop: 8 }}>
         <div>
           <h2 style={{ fontWeight: 900, fontSize: 20, letterSpacing: -0.3 }}>Scan Card</h2>
-          <div style={{ fontSize: 11, color: COLORS.muted, fontWeight: 500, marginTop: 1 }}>AI-powered grading analysis</div>
+          <div style={{ fontSize: 11, color: COLORS.muted, fontWeight: 500, marginTop: 1 }}>
+            {scanMode === 'free' ? 'Identify card instantly — free & unlimited' : 'AI grades your card condition'}
+          </div>
         </div>
         <Badge color={profile?.is_pro ? COLORS.gold : COLORS.muted}>{profile?.is_pro ? 'PRO' : scansLeft}</Badge>
+      </div>
+
+      {/* Scan mode selector */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 20, background: COLORS.card, borderRadius: 14, padding: 4, border: `1px solid ${COLORS.border}` }}>
+        {[
+          { id: 'free', label: '⚡ Free Scan', desc: 'Unlimited' },
+          { id: 'ai',   label: '🤖 AI Grade',  desc: scansLeft },
+        ].map(m => (
+          <button key={m.id} onClick={() => { setScanMode(m.id); setResult(null); setError('') }} style={{
+            flex: 1, padding: '10px 8px', borderRadius: 10,
+            background: scanMode === m.id ? (m.id === 'free' ? COLORS.success + '18' : COLORS.gold + '18') : 'transparent',
+            border: `1.5px solid ${scanMode === m.id ? (m.id === 'free' ? COLORS.success : COLORS.gold) : 'transparent'}`,
+            color: scanMode === m.id ? (m.id === 'free' ? COLORS.success : COLORS.gold) : COLORS.muted,
+            fontWeight: 700, fontSize: 13, cursor: 'pointer', transition: 'all .15s',
+            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
+          }}>
+            <span>{m.label}</span>
+            <span style={{ fontSize: 10, fontWeight: 500, opacity: 0.8 }}>{m.desc}</span>
+          </button>
+        ))}
       </div>
 
       {/* Game selector */}
@@ -896,9 +952,15 @@ function ScanScreen({ user, profile, onScanDone, modelState, modelProgress }) {
 
       {error && <p style={{ color: COLORS.danger, fontSize: 13, marginBottom: 12, textAlign: 'center' }}>{error}</p>}
 
-      <Btn onClick={analyze} disabled={loading || !frontImg}>
-        {loading ? <><Spinner size={18} color="#0a0a12" /> Analyzing...</> : '🔍 Analyze Card'}
-      </Btn>
+      {scanMode === 'free' ? (
+        <Btn onClick={freeScan} disabled={loading || !frontImg} style={{ background: loading ? COLORS.success + '99' : COLORS.success }}>
+          {loading ? <><Spinner size={18} color="#0a0a12" /> Scanning...</> : '⚡ Free Scan'}
+        </Btn>
+      ) : (
+        <Btn onClick={analyze} disabled={loading || !frontImg}>
+          {loading ? <><Spinner size={18} color="#0a0a12" /> Analyzing...</> : '🤖 AI Grade Card'}
+        </Btn>
+      )}
 
       {/* Vision model status */}
       {modelState === 'loading' && (
@@ -922,7 +984,169 @@ function ScanScreen({ user, profile, onScanDone, modelState, modelProgress }) {
       )}
 
       {/* Result */}
-      {result && <GradeResult result={result} game={game} frontImg={frontImg} user={user} onSave={() => { setResult(null); setFrontImg(null); setBackImg(null); onScanDone() }} />}
+      {result && result.type === 'free' && (
+        <FreeScanResult
+          result={result}
+          game={game}
+          frontImg={frontImg}
+          user={user}
+          onSave={() => { setResult(null); setFrontImg(null); setBackImg(null); onScanDone() }}
+          onSwitchToAI={() => { setResult(null); setScanMode('ai') }}
+        />
+      )}
+      {result && result.type !== 'free' && (
+        <GradeResult result={result} game={game} frontImg={frontImg} user={user} onSave={() => { setResult(null); setFrontImg(null); setBackImg(null); onScanDone() }} />
+      )}
+    </div>
+  )
+}
+
+function FreeScanResult({ result, game, frontImg, user, onSave, onSwitchToAI }) {
+  const candidates = result.autoMatched ? [result.match, ...(result.alternatives || [])] : (result.candidates || [])
+  const [selected, setSelected] = useState(result.autoMatched ? result.match : candidates[0])
+  const [finish, setFinish] = useState(selected?.finishTypes?.[0] || 'Normal')
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+  const [saveError, setSaveError] = useState('')
+
+  const priceRow = (selected?.card_prices || []).find(p => p.finish === finish) || {}
+  const price = priceRow.price_avg7 || selected?.price_eur || null
+
+  async function save() {
+    if (!selected) return
+    setSaving(true)
+    const { error } = await supabase.from('cards').insert({
+      user_id:       user.id,
+      name:          selected.name,
+      game,
+      finish,
+      value:         price,
+      price_avg7:    priceRow.price_avg7  || null,
+      price_avg30:   priceRow.price_avg30 || null,
+      price_low:     priceRow.price_low   || null,
+      price_sell:    priceRow.price_sell  || null,
+      cardmarket_url: priceRow.cm_url     || selected.cardmarket_url || null,
+      image_url:     selected.image_url   || null,
+      card_number:   selected.number      || null,
+      set_name:      selected.set_name    || null,
+      catalog_id:    selected.id          || null,
+    })
+    setSaving(false)
+    if (error) { setSaveError(error.message); return }
+    setSaved(true)
+    setTimeout(onSave, 700)
+  }
+
+  if (!selected && candidates.length === 0) {
+    return (
+      <div style={{ marginTop: 20, padding: 20, background: COLORS.card, borderRadius: 16, border: `1px solid ${COLORS.border}`, textAlign: 'center' }}>
+        <div style={{ fontSize: 32, marginBottom: 8 }}>🔍</div>
+        <div style={{ fontWeight: 700, marginBottom: 4 }}>Card not found</div>
+        <div style={{ fontSize: 13, color: COLORS.muted, marginBottom: 16 }}>
+          {result.ocrText ? `OCR read: "${result.ocrText}"` : 'Could not read card name'}
+        </div>
+        <Btn onClick={onSwitchToAI} variant="secondary" small>Try AI Scan instead</Btn>
+      </div>
+    )
+  }
+
+  return (
+    <div style={{ marginTop: 20 }}>
+      {/* Confidence banner */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, padding: '8px 12px', borderRadius: 10, background: result.autoMatched ? `${COLORS.success}12` : `${COLORS.gold}12`, border: `1px solid ${result.autoMatched ? COLORS.success : COLORS.gold}30` }}>
+        <span style={{ fontSize: 16 }}>{result.autoMatched ? '✅' : '🔎'}</span>
+        <div>
+          <div style={{ fontSize: 12, fontWeight: 700, color: result.autoMatched ? COLORS.success : COLORS.gold }}>
+            {result.autoMatched ? 'Auto-matched' : 'Select the correct card'}
+          </div>
+          {result.ocrText && <div style={{ fontSize: 11, color: COLORS.muted }}>OCR: "{result.ocrText}"</div>}
+        </div>
+        <div style={{ marginLeft: 'auto', fontSize: 11, color: COLORS.muted }}>
+          {Math.round((result.confidence || 0) * 100)}% confident
+        </div>
+      </div>
+
+      {/* Candidate selector (if not auto-matched) */}
+      {!result.autoMatched && candidates.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
+          {candidates.map((c, i) => (
+            <button key={c.id || i} onClick={() => { setSelected(c); setFinish(c.finishTypes?.[0] || 'Normal') }} style={{
+              display: 'flex', alignItems: 'center', gap: 12, padding: '10px 12px',
+              borderRadius: 12, background: selected?.id === c.id ? `${COLORS.gold}12` : COLORS.card,
+              border: `1.5px solid ${selected?.id === c.id ? COLORS.gold : COLORS.border}`,
+              cursor: 'pointer', textAlign: 'left', width: '100%',
+            }}>
+              {c.image_url && <img src={c.image_url} alt={c.name} style={{ width: 36, height: 50, objectFit: 'contain', borderRadius: 4 }} />}
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 14, color: '#fff' }}>{c.name}</div>
+                <div style={{ fontSize: 11, color: COLORS.muted }}>{c.set_name} · #{c.number}</div>
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {selected && (
+        <div style={{ background: COLORS.card, borderRadius: 16, border: `1px solid ${COLORS.border}`, overflow: 'hidden' }}>
+          {/* Card header */}
+          <div style={{ display: 'flex', gap: 14, padding: 16 }}>
+            <img
+              src={selected.image_url || frontImg}
+              alt={selected.name}
+              style={{ width: 80, height: 110, objectFit: 'contain', borderRadius: 8, background: '#111' }}
+            />
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 900, fontSize: 17, letterSpacing: -0.3, marginBottom: 2 }}>{selected.name}</div>
+              <div style={{ fontSize: 12, color: COLORS.muted, marginBottom: 8 }}>{selected.set_name} · #{selected.number}</div>
+              {selected.rarity && <Badge color={COLORS.muted} style={{ fontSize: 10 }}>{selected.rarity}</Badge>}
+            </div>
+          </div>
+
+          {/* Finish selector */}
+          {(selected.finishTypes || ['Normal']).length > 1 && (
+            <div style={{ padding: '0 16px 12px' }}>
+              <div style={{ fontSize: 11, color: COLORS.muted, marginBottom: 6, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 }}>Finish</div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                {(selected.finishTypes || ['Normal']).map(f => (
+                  <button key={f} onClick={() => setFinish(f)} style={{
+                    padding: '6px 12px', borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                    background: finish === f ? `${COLORS.gold}18` : 'transparent',
+                    border: `1.5px solid ${finish === f ? COLORS.gold : COLORS.border}`,
+                    color: finish === f ? COLORS.gold : COLORS.muted,
+                  }}>{f}</button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Prices */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, padding: '0 16px 16px' }}>
+            {[
+              { label: '7d avg', val: priceRow.price_avg7 || selected.price_avg7 },
+              { label: '30d avg', val: priceRow.price_avg30 || selected.price_avg30 },
+              { label: 'Low', val: priceRow.price_low || selected.price_eur_low },
+            ].map(({ label, val }) => (
+              <div key={label} style={{ background: '#0a0a14', borderRadius: 10, padding: '10px 8px', textAlign: 'center', border: `1px solid ${COLORS.border}` }}>
+                <div style={{ fontSize: 10, color: COLORS.muted, marginBottom: 3, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.4 }}>{label}</div>
+                <div style={{ fontSize: 15, fontWeight: 900, color: val ? COLORS.gold : COLORS.muted }}>
+                  {val ? `€${Number(val).toFixed(2)}` : '—'}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Actions */}
+          <div style={{ padding: '0 16px 16px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {saveError && <p style={{ color: COLORS.danger, fontSize: 12, textAlign: 'center' }}>{saveError}</p>}
+            <Btn onClick={save} disabled={saving || saved}>
+              {saved ? '✓ Saved!' : saving ? <><Spinner size={16} color="#0a0a12" /> Saving...</> : '+ Save to Collection'}
+            </Btn>
+            <Btn onClick={onSwitchToAI} variant="secondary" small>
+              🤖 Grade this card with AI
+            </Btn>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
