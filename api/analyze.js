@@ -366,8 +366,8 @@ async function _handler(req) {
           // Exact set name → pokemontcg.io set ID — enables direct set.id lookup (most precise)
           // IDs verified against pokemontcg.io API (printedTotal = Y in X/Y on physical card).
           const SET_NAME_TO_ID = {
-            // Scarlet & Violet
-            'Scarlet & Violet': 'sv1',   'Paldea Evolved': 'sv2',    'Obsidian Flames': 'sv3',
+            // Scarlet & Violet — IDs verified via pokemontcg.io API
+            'Scarlet & Violet': 'sv1',    'Paldea Evolved': 'sv2',      'Obsidian Flames': 'sv3',
             'Scarlet & Violet 151': 'sv3pt5', '151': 'sv3pt5',
             'Paradox Rift': 'sv4',        'Paldean Fates': 'sv4pt5',
             'Temporal Forces': 'sv5',     'Twilight Masquerade': 'sv6',
@@ -376,28 +376,31 @@ async function _handler(req) {
             'Journey Together': 'sv9',    'Destined Rivals': 'sv10',
             'Black Bolt': 'zsv10pt5',     'White Flare': 'rsv10pt5',
             // Sword & Shield
-            'Sword & Shield': 'swsh1',   'Rebel Clash': 'swsh2',    'Darkness Ablaze': 'swsh3',
-            'Vivid Voltage': 'swsh4',    'Battle Styles': 'swsh5',   'Chilling Reign': 'swsh6',
-            'Evolving Skies': 'swsh7',   'Fusion Strike': 'swsh8',   'Brilliant Stars': 'swsh9',
-            'Astral Radiance': 'swsh10', 'Lost Origin': 'swsh11',    'Silver Tempest': 'swsh12',
-            'Crown Zenith': 'swsh12pt5',
-            // Sun & Moon (including common Claude aliases like "Sun & Moon Base Set")
-            'Sun & Moon': 'sm1',         'Sun & Moon Base Set': 'sm1', 'Guardians Rising': 'sm2',  'Burning Shadows': 'sm3',
-            'Shining Legends': 'sm3pt5', 'Crimson Invasion': 'sm4',  'Ultra Prism': 'sm5',
-            'Forbidden Light': 'sm6',    'Celestial Storm': 'sm7',   'Dragon Majesty': 'sm7a',
-            'Lost Thunder': 'sm8',       'Team Up': 'sm9',           'Unbroken Bonds': 'sm10',
-            'Unified Minds': 'sm11',     'Cosmic Eclipse': 'sm12',
+            'Sword & Shield': 'swsh1',    'Rebel Clash': 'swsh2',      'Darkness Ablaze': 'swsh3',
+            "Champion's Path": 'swsh35',  'Vivid Voltage': 'swsh4',    'Shining Fates': 'swsh45',
+            'Battle Styles': 'swsh5',     'Chilling Reign': 'swsh6',   'Evolving Skies': 'swsh7',
+            'Fusion Strike': 'swsh8',     'Brilliant Stars': 'swsh9',  'Astral Radiance': 'swsh10',
+            'Lost Origin': 'swsh11',      'Silver Tempest': 'swsh12',  'Crown Zenith': 'swsh12pt5',
+            // Sun & Moon — IDs verified via pokemontcg.io API
+            // Note: Shining Legends=sm35, Dragon Majesty=sm75 (NOT sm3pt5/sm7a)
+            'Sun & Moon': 'sm1',          'Sun & Moon Base Set': 'sm1',
+            'Guardians Rising': 'sm2',    'Burning Shadows': 'sm3',
+            'Shining Legends': 'sm35',    'Crimson Invasion': 'sm4',   'Ultra Prism': 'sm5',
+            'Forbidden Light': 'sm6',     'Celestial Storm': 'sm7',    'Dragon Majesty': 'sm75',
+            'Lost Thunder': 'sm8',        'Team Up': 'sm9',            'Unbroken Bonds': 'sm10',
+            'Unified Minds': 'sm11',      'Hidden Fates': 'sm115',     'Cosmic Eclipse': 'sm12',
+            'Pokemon GO': 'pgo',          'Pokémon GO': 'pgo',
             // XY
-            'XY': 'xy1',            'Flashfire': 'xy2',     'Furious Fists': 'xy3',
-            'Phantom Forces': 'xy4','Primal Clash': 'xy5',  'Roaring Skies': 'xy6',
-            'Ancient Origins': 'xy7','BREAKthrough': 'xy8', 'BREAKpoint': 'xy9',
-            'Fates Collide': 'xy10','Steam Siege': 'xy11',  'Evolutions': 'xy12',
-            // Mega Evolution era (SV 2025–2026)
-            'Mega Evolution': 'me1',       // printedTotal 132
-            'Phantasmal Flames': 'me2',    // printedTotal  94  (set code PFL EN)
-            'Ascended Heroes': 'me2pt5',   // printedTotal 217
-            'Perfect Order': 'me3',        // printedTotal  88
-            'Chaos Rising': 'me4',         // printedTotal  86
+            'XY': 'xy1',             'Flashfire': 'xy2',      'Furious Fists': 'xy3',
+            'Phantom Forces': 'xy4', 'Primal Clash': 'xy5',   'Roaring Skies': 'xy6',
+            'Ancient Origins': 'xy7','BREAKthrough': 'xy8',   'BREAKpoint': 'xy9',
+            'Fates Collide': 'xy10', 'Steam Siege': 'xy11',   'Evolutions': 'xy12',
+            // Mega Evolution era (SV 2025–2026) — IDs verified via pokemontcg.io API
+            'Mega Evolution': 'me1',       // printedTotal 132 (set code MEG EN)
+            'Phantasmal Flames': 'me2',    // printedTotal  94 (set code PFL EN)
+            'Ascended Heroes': 'me2pt5',   // printedTotal 217 (set code ASC EN)
+            'Perfect Order': 'me3',        // printedTotal  88 (set code POR EN)
+            'Chaos Rising': 'me4',         // printedTotal  86 (set code CRI EN)
           }
 
           debugInfo.hasApiKey = !!PTCG_API_KEY
@@ -578,22 +581,46 @@ async function _handler(req) {
             // printedTotal values verified via pokemontcg.io API.
             // Only include denominators that are globally unique across all English sets.
             // Shared denominators (182=sv4=sv10, 162=sv5=xy8, 159=sv9=swsh12pt5, etc.) are excluded.
+            // Denominator → set ID map. All printedTotals verified against pokemontcg.io API.
+            // Only denominators that are GLOBALLY UNIQUE across all English modern sets are included.
+            // Excluded (shared): 198(sv1=swsh6), 182(sv4=sv10), 162(sv5=xy8), 131(sv8pt5=sm6),
+            //   159(sv9=swsh12pt5), 86(zsv10pt5=rsv10pt5=me4), 149(sm1=bw7), 189(swsh3=swsh10),
+            //   73(sm35=swsh35), 122(xy9=swsh45sv), 214(sm8=sm10), 236(sm11=sm12)
+            // Special note: sma (Hidden Fates Shiny Vault) has printedTotal=94 BUT its cards are
+            //   numbered "SV001/SV094" — raw denominator "SV094" contains non-digits, so skipped below.
             const UNIQUE_DENOM_TO_SET = {
-              '165': 'sv3pt5',  // 151            — unique (no other EN set has 165 base)
-              '193': 'sv2',     // Paldea Evolved  — unique
-              '197': 'sv3',     // Obsidian Flames — unique
-              '091': 'sv4pt5',  // Paldean Fates   — unique
-              '167': 'sv6',     // Twilight Masquerade — unique
-              '064': 'sv6pt5',  // Shrouded Fable  — unique in modern era
-              '142': 'sv7',     // Stellar Crown   — unique
-              '191': 'sv8',     // Surging Sparks  — unique
-              '132': 'me1',     // Mega Evolution  — unique
-              '094': 'me2',     // Phantasmal Flames (PFL) — unique in modern era
-              '217': 'me2pt5',  // Ascended Heroes — unique
-              '088': 'me3',     // Perfect Order   — unique
+              // Scarlet & Violet era
+              '165': 'sv3pt5',  // 151                 — unique
+              '193': 'sv2',     // Paldea Evolved       — unique
+              '197': 'sv3',     // Obsidian Flames      — unique
+              '091': 'sv4pt5',  // Paldean Fates        — unique
+              '167': 'sv6',     // Twilight Masquerade  — unique
+              '064': 'sv6pt5',  // Shrouded Fable       — unique
+              '142': 'sv7',     // Stellar Crown        — unique
+              '191': 'sv8',     // Surging Sparks       — unique
+              // Sword & Shield era (unique denominators)
+              '192': 'swsh2',   // Rebel Clash          — unique
+              '185': 'swsh4',   // Vivid Voltage        — unique
+              '163': 'swsh5',   // Battle Styles        — unique
+              '203': 'swsh7',   // Evolving Skies       — unique
+              '264': 'swsh8',   // Fusion Strike        — unique
+              '172': 'swsh9',   // Brilliant Stars      — unique
+              '196': 'swsh11',  // Lost Origin          — unique
+              '195': 'swsh12',  // Silver Tempest       — unique
+              '202': 'swsh1',   // Sword & Shield       — unique
+              // Mega Evolution era (SV 2025–2026)
+              '132': 'me1',     // Mega Evolution       — unique
+              '094': 'me2',     // Phantasmal Flames    — unique (sma=Hidden Fates SV has SV-prefix numbers, filtered below)
+              '217': 'me2pt5',  // Ascended Heroes      — unique
+              '088': 'me3',     // Perfect Order        — unique
             }
-            const _cardDenom = cardNumber?.split('/')?.[1]?.trim()?.replace(/\D/g, '')
-            const _denomImpliedSet = _cardDenom ? UNIQUE_DENOM_TO_SET[_cardDenom] : null
+            // Only use UNIQUE_DENOM_TO_SET when the raw denominator is pure digits (no letters).
+            // Hidden Fates Shiny Vault (sma) cards are numbered "SV001/SV094" — the raw denominator
+            // "SV094" has non-digit chars and would otherwise falsely match '094' → me2.
+            const _rawDenom = cardNumber?.split('/')?.[1]?.trim() || ''
+            const _denomHasNonDigits = /[^0-9]/.test(_rawDenom)
+            const _cardDenom = _rawDenom.replace(/\D/g, '')
+            const _denomImpliedSet = (!_denomHasNonDigits && _cardDenom) ? UNIQUE_DENOM_TO_SET[_cardDenom] : null
             // numberSuspect: fires when denominator implies a different set than the AI's set name,
             // OR when Claude's reported era contradicts the SV-era set that the set name maps to
             // (e.g. Claude says "Sun & Moon Base Set" + era SM, but SET_NAME_TO_ID says rsv10pt5 = SV).
@@ -1250,9 +1277,10 @@ CARD NUMBER — CRITICAL: The second image is an enlarged crop of the bottom of 
 SET NAME — CRITICAL: Read the SPECIFIC set name from the small text at the very bottom of the card.
 Known English set names (return these exactly):
 Scarlet & Violet era: Scarlet & Violet, Paldea Evolved, Obsidian Flames, 151, Paradox Rift, Paldean Fates, Temporal Forces, Twilight Masquerade, Shrouded Fable, Stellar Crown, Surging Sparks, Prismatic Evolutions, Journey Together, Destined Rivals, Black Bolt, White Flare.
-Mega Evolution era: Mega Evolution, Phantasmal Flames, Ascended Heroes, Perfect Order, Chaos Rising.
-Sword & Shield era: Brilliant Stars, Astral Radiance, Lost Origin, Silver Tempest, Crown Zenith, Evolving Skies, Fusion Strike, Chilling Reign, Battle Styles, Rebel Clash, Vivid Voltage, Darkness Ablaze.
-XY era: Evolutions, Steam Siege, Fates Collide, BREAKpoint, BREAKthrough, Ancient Origins, Roaring Skies, Primal Clash, Phantom Forces, Furious Fists, Flashfire.
+Mega Evolution era (SV 2025–2026): Mega Evolution, Phantasmal Flames, Ascended Heroes, Perfect Order, Chaos Rising.
+Sword & Shield era: Sword & Shield, Rebel Clash, Darkness Ablaze, Champion's Path, Vivid Voltage, Shining Fates, Battle Styles, Chilling Reign, Evolving Skies, Fusion Strike, Brilliant Stars, Astral Radiance, Lost Origin, Silver Tempest, Crown Zenith.
+Sun & Moon era: Sun & Moon, Guardians Rising, Burning Shadows, Shining Legends, Crimson Invasion, Ultra Prism, Forbidden Light, Celestial Storm, Dragon Majesty, Lost Thunder, Team Up, Unbroken Bonds, Unified Minds, Hidden Fates, Cosmic Eclipse.
+XY era: Evolutions, Steam Siege, Fates Collide, BREAKpoint, BREAKthrough, Ancient Origins, Roaring Skies, Primal Clash, Phantom Forces, Furious Fists, Flashfire, XY.
 - Do NOT return a series name like "Scarlet & Violet Series" — return the exact product name.
 - If Japanese, unreadable, or uncertain → return null. NEVER guess.
 - The set name is printed in plain readable text and is FAR MORE RELIABLE than the card number on premium foil cards. Prioritize reading the set name accurately — it is the single most important field for correct identification.
