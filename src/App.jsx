@@ -780,6 +780,12 @@ function ScanScreen({ user, profile, onScanDone, modelState, modelProgress }) {
         officialImageUrl: data.officialImageUrl || matchedCard?.image_url || null,
         catalogId: data.catalogId || matchedCard?.id || null,
         catalogPriceEur: data.catalogPriceEur ?? matchedCard?.price_eur ?? null,
+        catalogPriceAvg7: data.catalogPriceAvg7 ?? null,
+        catalogPriceAvg30: data.catalogPriceAvg30 ?? null,
+        catalogPriceLow: data.catalogPriceLow ?? null,
+        catalogPriceSell: data.catalogPriceSell ?? null,
+        catalogPriceUpdatedAt: data.catalogPriceUpdatedAt ?? null,
+        catalogPriceIsRH: data.catalogPriceIsRH ?? false,
         catalogCardmarketUrl: data.catalogCardmarketUrl || matchedCard?.cardmarket_url || null,
         verifiedRarity: data.verifiedRarity || matchedCard?.rarity || null,
         verifiedSetName: data.verifiedSetName || matchedCard?.set_name || null,
@@ -1152,10 +1158,12 @@ function GradeResult({ result, game, frontImg, user, onSave }) {
 
         {/* Pris-sektion */}
         <div style={{ background: `linear-gradient(135deg, ${COLORS.bg}, #0a0a12)`, borderRadius: 14, padding: '14px 16px', border: `1px solid ${COLORS.border}` }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
             <div>
               <div style={{ fontSize: 10, color: COLORS.muted, textTransform: 'uppercase', letterSpacing: 1, fontWeight: 700, marginBottom: 4 }}>
-                {result.catalogPriceEur ? 'Raw Market Price' : 'Raw Market Est.'}
+                {result.catalogPriceEur
+                  ? `Cardmarket${result.catalogPriceIsRH ? ' · Reverse Holo' : ''}`
+                  : 'Raw Market Est.'}
               </div>
               <div style={{ fontSize: 28, fontWeight: 700, color: COLORS.gold, fontFamily: FONT_VALUE, letterSpacing: -0.5, lineHeight: 1 }}>
                 {result.catalogPriceEur
@@ -1163,6 +1171,11 @@ function GradeResult({ result, game, frontImg, user, onSave }) {
                   : (result.estimatedRawValue || result.estimatedPSAValue || '—')
                 }
               </div>
+              {result.catalogPriceUpdatedAt && (
+                <div style={{ fontSize: 10, color: COLORS.muted, marginTop: 3 }}>
+                  updated {result.catalogPriceUpdatedAt.replace(/\//g, '-')}
+                </div>
+              )}
             </div>
             {result.catalogCardmarketUrl && (
               <a href={result.catalogCardmarketUrl} target="_blank" rel="noreferrer" style={{
@@ -1176,6 +1189,34 @@ function GradeResult({ result, game, frontImg, user, onSave }) {
               </a>
             )}
           </div>
+          {result.catalogPriceEur && (result.catalogPriceAvg7 || result.catalogPriceAvg30 || result.catalogPriceLow) && (
+            <div style={{ display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>
+              {result.catalogPriceAvg7 && (
+                <div style={{ background: `${COLORS.gold}10`, border: `1px solid ${COLORS.gold}20`, borderRadius: 6, padding: '4px 8px' }}>
+                  <div style={{ fontSize: 9, color: COLORS.muted, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 700 }}>7d avg</div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: COLORS.gold }}>
+                    {new Intl.NumberFormat('da-DK', { style: 'currency', currency: 'EUR' }).format(result.catalogPriceAvg7)}
+                  </div>
+                </div>
+              )}
+              {result.catalogPriceAvg30 && (
+                <div style={{ background: `${COLORS.gold}10`, border: `1px solid ${COLORS.gold}20`, borderRadius: 6, padding: '4px 8px' }}>
+                  <div style={{ fontSize: 9, color: COLORS.muted, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 700 }}>30d avg</div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: COLORS.gold }}>
+                    {new Intl.NumberFormat('da-DK', { style: 'currency', currency: 'EUR' }).format(result.catalogPriceAvg30)}
+                  </div>
+                </div>
+              )}
+              {result.catalogPriceLow && (
+                <div style={{ background: `${COLORS.success}10`, border: `1px solid ${COLORS.success}20`, borderRadius: 6, padding: '4px 8px' }}>
+                  <div style={{ fontSize: 9, color: COLORS.muted, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 700 }}>low</div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: COLORS.success }}>
+                    {new Intl.NumberFormat('da-DK', { style: 'currency', currency: 'EUR' }).format(result.catalogPriceLow)}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
           <div style={{ height: 1, background: `${COLORS.border}`, marginBottom: 10 }} />
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <span style={{ fontSize: 12, color: COLORS.muted }}>PSA Grading Fee</span>

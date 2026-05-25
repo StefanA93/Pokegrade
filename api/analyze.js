@@ -173,6 +173,12 @@ async function _handler(req) {
   let catalogId = matchedCard?.id || null
   let catalogPriceEur = matchedCard?.price_eur || null
   let catalogCardmarketUrl = matchedCard?.cardmarket_url || null
+  let catalogPriceUpdatedAt = null  // when Cardmarket last synced prices for this card
+  let catalogPriceAvg7 = null       // 7-day Cardmarket average (most stable signal)
+  let catalogPriceAvg30 = null      // 30-day Cardmarket average
+  let catalogPriceLow = null        // lowest current price on Cardmarket
+  let catalogPriceSell = null       // average actual sell price on Cardmarket
+  let catalogPriceIsRH = false      // whether prices are for Reverse Holo variant
   let verifiedRarity = matchedCard?.rarity || null
   let verifiedSetName = matchedCard?.set_name || null
   let verifiedNumber = matchedCard?.number || null
@@ -990,7 +996,14 @@ async function _handler(req) {
 
               catalogId = commitCard.id
               officialImageUrl = commitCard.images?.large || commitCard.images?.small || null
-              catalogPriceEur = commitCard.cardmarket?.prices?.trendPrice || commitCard.cardmarket?.prices?.averageSellPrice || null
+              const _cmMain = extractCmPrices(commitCard, parsedFinish === 'Reverse Holo')
+              catalogPriceEur = _cmMain.price
+              catalogPriceAvg7 = _cmMain.avg7
+              catalogPriceAvg30 = _cmMain.avg30
+              catalogPriceLow = _cmMain.low
+              catalogPriceSell = _cmMain.sell
+              catalogPriceUpdatedAt = _cmMain.updatedAt
+              catalogPriceIsRH = _cmMain.isRH
               catalogCardmarketUrl = commitCard.cardmarket?.url || null
               debugInfo.catalogHit = true
               debugInfo.source = 'ptcg'
@@ -1008,11 +1021,10 @@ async function _handler(req) {
             debugInfo.ptcgError = ptcgErr.message
           }
 
-          // Reverse Holo price note: pokemontcg.io does not have separate RH entries.
-          // RH versions typically sell for 1.3–2.5x the non-RH Cardmarket price.
-          // Flag it so the frontend can display an appropriate note.
           if (parsedFinish === 'Reverse Holo' && catalogPriceEur) {
-            debugInfo.rhNote = `RH price shown is base version — actual RH price ~${(catalogPriceEur * 1.5).toFixed(2)}€ est.`
+            debugInfo.rhNote = catalogPriceIsRH
+              ? `RH price from Cardmarket (reverseHoloTrend)`
+              : `No RH-specific price available — showing base price (RH typically 1.3–2.5x)`
           }
 
           // Global UR recovery: fires when all set-constrained PTCG passes failed (or were score-gated)
@@ -1040,7 +1052,14 @@ async function _handler(req) {
                 if (gurHit) {
                   catalogId = gurHit.id
                   officialImageUrl = gurHit.images?.large || gurHit.images?.small || null
-                  catalogPriceEur = gurHit.cardmarket?.prices?.trendPrice || gurHit.cardmarket?.prices?.averageSellPrice || null
+                  const _cmGurA = extractCmPrices(gurHit, parsedFinish === 'Reverse Holo')
+                  catalogPriceEur = _cmGurA.price
+                  catalogPriceAvg7 = _cmGurA.avg7
+                  catalogPriceAvg30 = _cmGurA.avg30
+                  catalogPriceLow = _cmGurA.low
+                  catalogPriceSell = _cmGurA.sell
+                  catalogPriceUpdatedAt = _cmGurA.updatedAt
+                  catalogPriceIsRH = _cmGurA.isRH
                   catalogCardmarketUrl = gurHit.cardmarket?.url || null
                   debugInfo.catalogHit = true
                   debugInfo.source = 'ptcg-global-ur'
@@ -1064,7 +1083,14 @@ async function _handler(req) {
                 if (gurBHit) {
                   catalogId = gurBHit.id
                   officialImageUrl = gurBHit.images?.large || gurBHit.images?.small || null
-                  catalogPriceEur = gurBHit.cardmarket?.prices?.trendPrice || gurBHit.cardmarket?.prices?.averageSellPrice || null
+                  const _cmGurB = extractCmPrices(gurBHit, parsedFinish === 'Reverse Holo')
+                  catalogPriceEur = _cmGurB.price
+                  catalogPriceAvg7 = _cmGurB.avg7
+                  catalogPriceAvg30 = _cmGurB.avg30
+                  catalogPriceLow = _cmGurB.low
+                  catalogPriceSell = _cmGurB.sell
+                  catalogPriceUpdatedAt = _cmGurB.updatedAt
+                  catalogPriceIsRH = _cmGurB.isRH
                   catalogCardmarketUrl = gurBHit.cardmarket?.url || null
                   debugInfo.catalogHit = true
                   debugInfo.source = 'ptcg-global-ur'
@@ -1114,7 +1140,14 @@ async function _handler(req) {
                 if (gurCHit) {
                   catalogId = gurCHit.id
                   officialImageUrl = gurCHit.images?.large || gurCHit.images?.small || null
-                  catalogPriceEur = gurCHit.cardmarket?.prices?.trendPrice || gurCHit.cardmarket?.prices?.averageSellPrice || null
+                  const _cmGurC = extractCmPrices(gurCHit, parsedFinish === 'Reverse Holo')
+                  catalogPriceEur = _cmGurC.price
+                  catalogPriceAvg7 = _cmGurC.avg7
+                  catalogPriceAvg30 = _cmGurC.avg30
+                  catalogPriceLow = _cmGurC.low
+                  catalogPriceSell = _cmGurC.sell
+                  catalogPriceUpdatedAt = _cmGurC.updatedAt
+                  catalogPriceIsRH = _cmGurC.isRH
                   catalogCardmarketUrl = gurCHit.cardmarket?.url || null
                   debugInfo.catalogHit = true
                   debugInfo.source = 'ptcg-global-ur'
@@ -1305,6 +1338,12 @@ async function _handler(req) {
     officialImageUrl,
     catalogId: catalogId || null,
     catalogPriceEur: catalogPriceEur || null,
+    catalogPriceAvg7: catalogPriceAvg7 || null,
+    catalogPriceAvg30: catalogPriceAvg30 || null,
+    catalogPriceLow: catalogPriceLow || null,
+    catalogPriceSell: catalogPriceSell || null,
+    catalogPriceUpdatedAt: catalogPriceUpdatedAt || null,
+    catalogPriceIsRH,
     catalogCardmarketUrl: catalogCardmarketUrl || null,
     verifiedRarity: verifiedRarity || null,
     verifiedSetName: verifiedSetName || null,
@@ -1313,6 +1352,36 @@ async function _handler(req) {
   }), {
     headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
   })
+}
+
+function extractCmPrices(card, isRH) {
+  const p = card.cardmarket?.prices
+  const updatedAt = card.cardmarket?.updatedAt || null
+  if (!p) return { price: null, avg7: null, avg30: null, low: null, sell: null, updatedAt, isRH: false }
+  if (isRH) {
+    const rhPrice = p.reverseHoloTrend || p.reverseHoloAvg7 || p.reverseHoloSell || null
+    if (rhPrice) {
+      return {
+        price: rhPrice,
+        avg7: p.reverseHoloAvg7 || null,
+        avg30: p.reverseHoloAvg30 || null,
+        low: p.reverseHoloLow || null,
+        sell: p.reverseHoloSell || null,
+        updatedAt,
+        isRH: true,
+      }
+    }
+  }
+  const price = p.avg7 || p.trendPrice || p.averageSellPrice || null
+  return {
+    price,
+    avg7: p.avg7 || null,
+    avg30: p.avg30 || null,
+    low: p.lowPrice || null,
+    sell: p.averageSellPrice || null,
+    updatedAt,
+    isRH: false,
+  }
 }
 
 function buildGradingPrompt(game, card) {
