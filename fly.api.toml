@@ -1,0 +1,36 @@
+app = "gradedex-api"
+primary_region = "ams"
+
+[build]
+  dockerfile = "server/Dockerfile"
+
+[env]
+  NODE_ENV = "production"
+  PORT     = "3001"
+
+[[services]]
+  protocol      = "tcp"
+  internal_port = 3001
+
+  [[services.ports]]
+    handlers = ["http"]
+    port     = 80
+
+  [[services.ports]]
+    handlers = ["tls", "http"]
+    port     = 443
+
+  [[services.http_checks]]
+    path             = "/health"
+    interval         = "10s"
+    timeout          = "5s"
+    grace_period     = "15s"
+    restart_limit    = 3
+
+[vm]
+  memory      = "512mb"
+  cpu_kind    = "shared"
+  cpus        = 1
+
+[[vm]]
+  size = "shared-cpu-1x"

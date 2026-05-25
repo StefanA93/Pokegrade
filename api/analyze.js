@@ -4,6 +4,8 @@ const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY
 const SUPABASE_URL = process.env.SUPABASE_URL
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY
 const PTCG_API_KEY = process.env.PTCG_API_KEY || process.env.TCG_API_KEY
+const CARDMARKET_API_KEY = process.env.CARDMARKET_API_KEY   // cardmarket-api.com via RapidAPI
+const TCGAPI_KEY = process.env.TCGAPI_KEY                   // tcgapi.dev
 
 export default async function handler(req) {
   try {
@@ -1162,6 +1164,219 @@ async function _handler(req) {
               debugInfo.gurError = gurErr.message
             }
           }
+        }
+
+        // ── MTG: Scryfall ─────────────────────────────────────────────────────
+        // Free, no key. Returns Cardmarket EUR price (24h cache) + full card data.
+        if (game === 'mtg' && cardName && !catalogId) {
+          try {
+            const sfName = cardName.replace(/\s*\/\/.*/, '').trim() // strip "Name // Name" double-faced suffix
+            const ctrl = new AbortController()
+            const timer = setTimeout(() => ctrl.abort(), 5000)
+            const r = await fetch(
+              `https://api.scryfall.com/cards/named?fuzzy=${encodeURIComponent(sfName)}`,
+              { signal: ctrl.signal }
+            )
+            clearTimeout(timer)
+            if (r.ok) {
+              const d = await r.json()
+              if (d.object !== 'error') {
+                const isFoil = /foil|etched/i.test(parsedFinish || '')
+                const eurPrice = isFoil
+                  ? (d.prices?.eur_foil ? parseFloat(d.prices.eur_foil) : null)
+                  : (d.prices?.eur      ? parseFloat(d.prices.eur)      : null)
+                catalogId          = d.id
+                officialImageUrl   = d.image_uris?.normal || d.card_faces?.[0]?.image_uris?.normal || null
+                catalogPriceEur    = eurPrice
+                catalogPriceAvg7   = null
+                catalogPriceAvg30  = null
+                catalogPriceLow    = null
+                catalogPriceUpdatedAt = null
+                catalogPriceIsRH   = false
+                catalogCardmarketUrl = d.purchase_uris?.cardmarket || null
+                verifiedRarity     = d.rarity ? d.rarity.charAt(0).toUpperCase() + d.rarity.slice(1) : null
+                verifiedSetName    = d.set_name || null
+                verifiedNumber     = d.collector_number || null
+                debugInfo.catalogHit = true
+                debugInfo.source   = 'scryfall'
+                debugInfo.verified = `${verifiedRarity} · ${verifiedSetName} · #${verifiedNumber}`
+              } else {
+                debugInfo.scryfallMiss = d.details || 'not found'
+              }
+            }
+          } catch (sfErr) {
+            debugInfo.scryfallError = sfErr.message
+          }
+        }
+
+        // ── Yu-Gi-Oh!: YGOProDeck ────────────────────────────────────────────
+        // Free, no key. card_prices[0].cardmarket_price = Cardmarket EUR directly.
+        if (game === 'yugioh' && cardName && !catalogId) {
+          try {
+            let ygoCard = null
+            // 1) exact name match
+            const ctrl1 = new AbortController()
+            const t1 = setTimeout(() => ctrl1.abort(), 5000)
+            const r1 = await fetch(
+              `https://db.ygoprodeck.com/api/v7/cardinfo.php?name=${encodeURIComponent(cardName)}`,
+              { signal: ctrl1.signal }
+            )
+            clearTimeout(t1)
+            if (r1.ok) ygoCard = (await r1.json()).data?.[0] || null
+            // 2) fuzzy fallback
+            if (!ygoCard) {
+              const ctrl2 = new AbortController()
+              const t2 = setTimeout(() => ctrl2.abort(), 5000)
+              const r2 = await fetch(
+                `https://db.ygoprodeck.com/api/v7/cardinfo.php?fname=${encodeURIComponent(cardName)}&num=1&offset=0`,
+                { signal: ctrl2.signal }
+              )
+              clearTimeout(t2)
+              if (r2.ok) ygoCard = (await r2.json()).data?.[0] || null
+            }
+            if (ygoCard) {
+              const cmPrice = parseFloat(ygoCard.card_prices?.[0]?.cardmarket_price || '0') || null
+              catalogId          = String(ygoCard.id)
+              officialImageUrl   = ygoCard.card_images?.[0]?.image_url || null
+              catalogPriceEur    = cmPrice
+              catalogPriceAvg7   = null
+              catalogPriceAvg30  = null
+              catalogPriceLow    = null
+              catalogPriceUpdatedAt = null
+              catalogPriceIsRH   = false
+              catalogCardmarketUrl = null
+              verifiedRarity     = ygoCard.rarity || null
+              verifiedSetName    = ygoCard.card_sets?.[0]?.set_name || null
+              verifiedNumber     = ygoCard.card_sets?.[0]?.set_code || null
+              debugInfo.catalogHit = true
+              debugInfo.source   = 'ygoprodeck'
+              debugInfo.verified = `${verifiedRarity} · ${verifiedSetName}`
+            }
+          } catch (ygoErr) {
+            debugInfo.ygoError = ygoErr.message
+          }
+        }
+
+        // ── Dragon Ball: TCGAPI.dev ───────────────────────────────────────────
+        // Requires TCGAPI_KEY. USD prices converted to EUR at ×0.92.
+        // Set TCGAPI_KEY in Vercel env vars once you have your tcgapi.dev key.
+        if (game === 'dragonball' && cardName && !catalogId && TCGAPI_KEY) {
+          try {
+            const ctrl = new AbortController()
+            const timer = setTimeout(() => ctrl.abort(), 5000)
+            const r = await fetch(
+              `https://api.tcgapi.dev/v1/search?q=${encodeURIComponent(cardName)}&game=dragon-ball`,
+              { headers: { 'X-API-Key': TCGAPI_KEY }, signal: ctrl.signal }
+            )
+            clearTimeout(timer)
+            if (r.ok) {
+              const d = await r.json()
+              const card = Array.isArray(d) ? d[0] : (d.data?.[0] || d.results?.[0] || null)
+              if (card) {
+                const usdPrice = parseFloat(card.market_price || card.marketPrice || '0') || null
+                catalogId          = String(card.id || card.productId || '')
+                officialImageUrl   = card.image_url || card.imageUrl || null
+                catalogPriceEur    = usdPrice ? Math.round(usdPrice * 0.92 * 100) / 100 : null
+                catalogPriceAvg7   = null
+                catalogPriceAvg30  = null
+                catalogPriceLow    = null
+                catalogPriceUpdatedAt = null
+                catalogPriceIsRH   = false
+                catalogCardmarketUrl = null
+                verifiedRarity     = card.rarity || null
+                verifiedSetName    = card.set_name || card.setName || null
+                verifiedNumber     = card.number  || card.collector_number || null
+                debugInfo.catalogHit = true
+                debugInfo.source   = 'tcgapi-dragonball'
+                debugInfo.verified = `${verifiedRarity} · ${verifiedSetName}`
+                if (usdPrice) debugInfo.priceNote = `USD ${usdPrice} → EUR ×0.92`
+              }
+            }
+          } catch (dbErr) {
+            debugInfo.dragonballError = dbErr.message
+          }
+        }
+
+        // ── One Piece + Lorcana: cardmarket-api.com (RapidAPI) ───────────────
+        // Requires CARDMARKET_API_KEY. Live EU prices directly from Cardmarket.
+        // Set CARDMARKET_API_KEY in Vercel env vars once you have your key.
+        // Endpoint confirmed from RapidAPI dashboard after signup.
+        const CM_GAME_MAP = { onepiece: 'one-piece', lorcana: 'lorcana' }
+        if (CM_GAME_MAP[game] && cardName && !catalogId && CARDMARKET_API_KEY) {
+          try {
+            const ctrl = new AbortController()
+            const timer = setTimeout(() => ctrl.abort(), 6000)
+            const r = await fetch(
+              `https://cardmarket-api1.p.rapidapi.com/cards?game=${CM_GAME_MAP[game]}&name=${encodeURIComponent(cardName)}`,
+              {
+                headers: {
+                  'x-rapidapi-key': CARDMARKET_API_KEY,
+                  'x-rapidapi-host': 'cardmarket-api1.p.rapidapi.com',
+                },
+                signal: ctrl.signal,
+              }
+            )
+            clearTimeout(timer)
+            if (r.ok) {
+              const d = await r.json()
+              const card = Array.isArray(d) ? d[0] : (d.data?.[0] || d.cards?.[0] || d.results?.[0] || null)
+              if (card) {
+                catalogId          = String(card.id || card.productId || '')
+                officialImageUrl   = card.image    || card.imageUrl    || card.image_url   || null
+                catalogPriceEur    = card.price_eur ?? card.priceEur   ?? card.avg         ?? card.trend ?? null
+                catalogPriceAvg7   = card.avg7      ?? card.price_avg7 ?? null
+                catalogPriceAvg30  = card.avg30     ?? card.price_avg30 ?? null
+                catalogPriceLow    = card.lowPrice  ?? card.low_price  ?? null
+                catalogPriceUpdatedAt = card.updatedAt ?? card.updated_at ?? null
+                catalogPriceIsRH   = false
+                catalogCardmarketUrl = card.url    ?? card.cardmarketUrl ?? null
+                verifiedRarity     = card.rarity   ?? null
+                verifiedSetName    = card.expansion ?? card.set_name   ?? card.setName ?? null
+                verifiedNumber     = card.number   ?? card.collector_number ?? null
+                debugInfo.catalogHit = true
+                debugInfo.source   = `cardmarket-api-${game}`
+                debugInfo.verified = `${verifiedRarity} · ${verifiedSetName} · #${verifiedNumber}`
+              }
+            }
+          } catch (cmErr) {
+            debugInfo.cmApiError = cmErr.message
+          }
+        }
+
+        // ── Pokémon live price supplement: cardmarket-api.com ────────────────
+        // When CARDMARKET_API_KEY is set, replace pokemontcg.io cached price
+        // with live Cardmarket price for the already-identified card.
+        if (game === 'pokemon' && catalogId && CARDMARKET_API_KEY && cardName) {
+          try {
+            const ctrl = new AbortController()
+            const timer = setTimeout(() => ctrl.abort(), 4000)
+            const r = await fetch(
+              `https://cardmarket-api1.p.rapidapi.com/cards?game=pokemon&name=${encodeURIComponent(cardName)}`,
+              {
+                headers: {
+                  'x-rapidapi-key': CARDMARKET_API_KEY,
+                  'x-rapidapi-host': 'cardmarket-api1.p.rapidapi.com',
+                },
+                signal: ctrl.signal,
+              }
+            )
+            clearTimeout(timer)
+            if (r.ok) {
+              const d = await r.json()
+              const card = Array.isArray(d) ? d[0] : (d.data?.[0] || d.cards?.[0] || null)
+              if (card) {
+                const liveEur = card.price_eur ?? card.priceEur ?? card.avg ?? card.trend ?? null
+                if (liveEur) {
+                  catalogPriceEur       = liveEur
+                  catalogPriceAvg7      = card.avg7   ?? card.price_avg7  ?? catalogPriceAvg7
+                  catalogPriceAvg30     = card.avg30  ?? card.price_avg30 ?? catalogPriceAvg30
+                  catalogPriceLow       = card.lowPrice ?? card.low_price ?? catalogPriceLow
+                  catalogPriceUpdatedAt = card.updatedAt ?? card.updated_at ?? catalogPriceUpdatedAt
+                  debugInfo.priceSource = 'cardmarket-api.com (live)'
+                }
+              }
+            }
+          } catch { /* keep pokemontcg.io price */ }
         }
 
         // Strategy Promo: when finish is Promo, search directly in promo sets (svp*, swshp*, etc.)

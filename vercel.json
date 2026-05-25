@@ -27,7 +27,7 @@
         { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" },
         {
           "key": "Content-Security-Policy",
-          "value": "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https:; connect-src 'self' https://yezlcgooutpshqdhvufg.supabase.co https://api.anthropic.com https://api.cardmarket.com https://api.pokemontcg.io wss://yezlcgooutpshqdhvufg.supabase.co https://huggingface.co https://cdn-lfs.huggingface.co https://cdn-lfs-us-1.huggingface.co; worker-src blob: 'self';"
+          "value": "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https:; connect-src 'self' https://yezlcgooutpshqdhvufg.supabase.co https://api.anthropic.com https://api.cardmarket.com https://api.pokemontcg.io wss://yezlcgooutpshqdhvufg.supabase.co https://huggingface.co https://cdn-lfs.huggingface.co https://cdn-lfs-us-1.huggingface.co https://api.scryfall.com https://db.ygoprodeck.com https://cardmarket-api1.p.rapidapi.com https://api.tcgapi.dev; worker-src blob: 'self';"
         }
       ]
     },

@@ -1,0 +1,24 @@
+app = "gradedex-worker"
+primary_region = "ams"
+
+[build]
+  dockerfile = "worker/Dockerfile"
+
+[env]
+  NODE_ENV = "production"
+
+[processes]
+  worker = "node worker/index.js"
+
+[[services]]
+  processes     = ["worker"]
+  protocol      = "tcp"
+  internal_port = 8080
+
+[vm]
+  memory   = "1gb"
+  cpu_kind = "shared"
+  cpus     = 1
+
+[[vm]]
+  size = "shared-cpu-2x"

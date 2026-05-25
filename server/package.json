@@ -1,0 +1,30 @@
+{
+  "name": "gradedex-server",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "start": "node ../server/index.js",
+    "start:worker": "node ../worker/index.js",
+    "dev": "node --watch ../server/index.js",
+    "dev:worker": "node --watch ../worker/index.js",
+    "bootstrap": "node ../scripts/bootstrap.js",
+    "queue:status": "node ../scripts/queue-status.js",
+    "deploy:api": "fly deploy --config ../fly.api.toml",
+    "deploy:worker": "fly deploy --config ../fly.worker.toml"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.600.0",
+    "@supabase/supabase-js": "^2.39.7",
+    "bullmq": "^5.12.0",
+    "fastify": "^4.28.0",
+    "@fastify/cors": "^9.0.1",
+    "@fastify/multipart": "^8.3.0",
+    "@fastify/rate-limit": "^9.1.0",
+    "ioredis": "^5.4.1",
+    "meilisearch": "^0.41.0",
+    "sharp": "^0.33.4",
+    "tesseract.js": "^5.1.0",
+    "dotenv": "^16.4.5"
+  }
+}
