@@ -381,8 +381,8 @@ async function _handler(req) {
             'Evolving Skies': 'swsh7',   'Fusion Strike': 'swsh8',   'Brilliant Stars': 'swsh9',
             'Astral Radiance': 'swsh10', 'Lost Origin': 'swsh11',    'Silver Tempest': 'swsh12',
             'Crown Zenith': 'swsh12pt5',
-            // Sun & Moon
-            'Sun & Moon': 'sm1',         'Guardians Rising': 'sm2',  'Burning Shadows': 'sm3',
+            // Sun & Moon (including common Claude aliases like "Sun & Moon Base Set")
+            'Sun & Moon': 'sm1',         'Sun & Moon Base Set': 'sm1', 'Guardians Rising': 'sm2',  'Burning Shadows': 'sm3',
             'Shining Legends': 'sm3pt5', 'Crimson Invasion': 'sm4',  'Ultra Prism': 'sm5',
             'Forbidden Light': 'sm6',    'Celestial Storm': 'sm7',   'Dragon Majesty': 'sm7a',
             'Lost Thunder': 'sm8',       'Team Up': 'sm9',           'Unbroken Bonds': 'sm10',
@@ -539,6 +539,18 @@ async function _handler(req) {
             // Only runs when AI returns a known specific set name (not a series name)
             const knownSetId = normSet ? SET_NAME_TO_ID[normSet] : null
 
+            // Era-set consistency check: if the mapped set ID is SV-era but Claude reported
+            // an older era (SM, XY, SWSH etc.), both the set name and number are hallucinated.
+            // Primary case: White Flare (rsv10pt5) / Black Bolt (zsv10pt5) reprints —
+            // Claude sees Deino, knows it from SM1, returns "Sun & Moon Base Set" + "93/149".
+            const SV_ERA_PREFIXES = ['sv', 'rsv', 'zsv', 'me']
+            const knownSetIsSV = knownSetId && SV_ERA_PREFIXES.some(p => knownSetId.startsWith(p))
+            const eraIsNotSV = setEra && setEra !== 'SV'
+            const eraSetConflict = knownSetIsSV && eraIsNotSV
+            if (eraSetConflict) {
+              debugInfo.eraConflict = `setId:${knownSetId}(SV) vs setEra:${setEra} → number hallucinated`
+            }
+
             // Mega Pokémon HP cross-validation (pokemon only):
             // XY-era Mega cards top out at ~240 HP. If AI reads HP > 300 for a Mega Pokémon
             // but mapped to an XY-era set ID, it confused a Mega Evolution era set with "Evolutions"
@@ -582,11 +594,16 @@ async function _handler(req) {
             }
             const _cardDenom = cardNumber?.split('/')?.[1]?.trim()?.replace(/\D/g, '')
             const _denomImpliedSet = _cardDenom ? UNIQUE_DENOM_TO_SET[_cardDenom] : null
-            const numberSuspect = !!(_denomImpliedSet && knownSetId && _denomImpliedSet !== knownSetId)
+            // numberSuspect: fires when denominator implies a different set than the AI's set name,
+            // OR when Claude's reported era contradicts the SV-era set that the set name maps to
+            // (e.g. Claude says "Sun & Moon Base Set" + era SM, but SET_NAME_TO_ID says rsv10pt5 = SV).
+            const numberSuspect = !!(_denomImpliedSet && knownSetId && _denomImpliedSet !== knownSetId) || eraSetConflict
             if (numberSuspect) {
               // Denominator is harder to confabulate than a set name — use it to correct the wrong set
-              debugInfo.numSuspect = `denom:${_cardDenom}→${_denomImpliedSet}≠${knownSetId} (foil hallucination — using denom set)`
-              effectiveSetId = _denomImpliedSet
+              if (_denomImpliedSet && knownSetId && _denomImpliedSet !== knownSetId) {
+                debugInfo.numSuspect = `denom:${_cardDenom}→${_denomImpliedSet}≠${knownSetId} (foil hallucination — using denom set)`
+                effectiveSetId = _denomImpliedSet
+              }
             }
             // If set name unknown but denominator uniquely identifies a set, use that as the anchor
             if (!effectiveSetId && _denomImpliedSet) {
@@ -620,6 +637,13 @@ async function _handler(req) {
                       debugInfo.p0dMismatch = `${candidates[0]?.id}(${candidates[0]?.name})≠${aiSpecies}`
                       candidates = []
                     }
+                  }
+                  // HP mismatch check: if AI read a specific HP but found card has different HP,
+                  // the number is likely hallucinated (reprint cards differ in HP from original).
+                  // e.g. White Flare Deino has HP:80 but SM1 Deino #93 has HP:60.
+                  if (candidates.length && hp && candidates[0]?.hp && candidates[0].hp !== hp) {
+                    debugInfo.p0dHpMismatch = `${candidates[0].id}(HP${candidates[0].hp})≠AI(HP${hp}) → discarded`
+                    candidates = []
                   }
                 }
               }
@@ -686,6 +710,13 @@ async function _handler(req) {
                 if (numHits.length) {
                   candidates = eraOk(numHits)
                   debugInfo.ptcgQ = `name+number(${n})`
+                  // HP mismatch: discard if found card HP doesn't match AI-read HP.
+                  // Catches reprint hallucination: e.g. AI returns sm1-93 Deino (HP60)
+                  // but the physical card is White Flare Deino (HP80).
+                  if (hp && candidates[0]?.hp && candidates[0].hp !== hp) {
+                    debugInfo.p0cHpMismatch = `${candidates[0].id}(HP${candidates[0].hp})≠AI(HP${hp}) → discarded`
+                    candidates = []
+                  }
                 }
               }
             }
@@ -1237,6 +1268,14 @@ MEGA EVOLUTION vs EVOLUTIONS — CRITICAL DISTINCTION (extremely common confusio
 For ALL Mega Evolution era sets (me1–me4): Mega Pokémon have HP 330–400+. Ultra Rare cards (★★ silver) ARE numbered above set total.
 - If you see a Mega Pokémon card with HP above 300 → it CANNOT be from "Evolutions" (xy12). It MUST be from "Mega Evolution" (me1) or another SV-era set. Do NOT default to "Evolutions" based on visual similarity.
 - CARD NUMBER must be read from the PHYSICAL card — NEVER inferred from memory or prior knowledge. If the card shows "155/132" → return "155/132". Do not substitute a number you recall from another version of the card.
+
+WHITE FLARE & BLACK BOLT — REPRINT SETS (jul 2025, SV era):
+- "White Flare" (set code: WHT EN) and "Black Bolt" (set code: BLK EN) are July 2025 reprint sets in the SCARLET & VIOLET era. The era is ALWAYS SV, NEVER SM, XY, SWSH, or any older generation.
+- These sets reprint SV-era Pokémon with new artwork. The cards look like standard SV cards in style and layout.
+- HOW TO IDENTIFY: Look at the set code printed in the bottom-left corner of the card. "WHT EN" = White Flare. "BLK EN" = Black Bolt. If you see "WHT EN" → return setName exactly "White Flare". If you see "BLK EN" → return setName exactly "Black Bolt". Also look for the text "White Flare" or "Black Bolt" printed at the very bottom center.
+- Both sets have 86 base cards (denominator 086). Secret zone cards go up to 173 (White Flare) or similar for Black Bolt.
+- CRITICAL: If a card Pokémon (e.g. Deino, Ralts, Dratini) appears in White Flare or Black Bolt, DO NOT return the card's original set (e.g. "Sun & Moon" or "XY"). The card's set is "White Flare" or "Black Bolt" — read the set code at the bottom. A Deino in White Flare has set code "WHT EN" and is numbered within /086, NOT "93/149" (which is the Sun & Moon version).
+- ⚠️ DO NOT HALLUCINATE: If you see a card with SV-era design (2025 copyright, modern layout) but recognize the Pokémon from an older set, the card is a REPRINT. Return the set name and number from the physical card, never from memory.
 
 FINISH — Identify in this exact priority order:
 
