@@ -961,7 +961,7 @@ function GradeResult({ result, game, frontImg, user, onSave }) {
       user_id: user.id,
       name: result.cardName || result.name || result.kortNavn || null,
       game,
-      grade: 7,
+      grade: psaGrade?.grade ?? 7,
       finish: result.verifiedRarity || result.finish || null,
       value: valueNum,
       price_range: result.estimatedRawValue || result.estimatedPSAValue || null,

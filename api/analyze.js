@@ -362,6 +362,7 @@ async function _handler(req) {
             'Sun & Moon': 'sm1', 'XY': 'xy1', 'Black & White': 'bw1',
             'HeartGold SoulSilver': 'hgss1', 'HeartGold & SoulSilver': 'hgss1',
             'Diamond & Pearl': 'dp1',
+            'Platinum': 'pl1',
           }
           // Exact set name → pokemontcg.io set ID — enables direct set.id lookup (most precise)
           // IDs verified against pokemontcg.io API (printedTotal = Y in X/Y on physical card).
@@ -401,6 +402,47 @@ async function _handler(req) {
             'Ascended Heroes': 'me2pt5',   // printedTotal 217 (set code ASC EN)
             'Perfect Order': 'me3',        // printedTotal  88 (set code POR EN)
             'Chaos Rising': 'me4',         // printedTotal  86 (set code CRI EN)
+            // Black & White era
+            'Black & White': 'bw1',      'Emerging Powers': 'bw2',    'Noble Victories': 'bw3',
+            'Next Destinies': 'bw4',     'Dark Explorers': 'bw5',     'Dragons Exalted': 'bw6',
+            'Boundaries Crossed': 'bw7', 'Plasma Storm': 'bw8',       'Plasma Freeze': 'bw9',
+            'Plasma Blast': 'bw10',      'Legendary Treasures': 'bw11',
+            // Diamond & Pearl era
+            'Diamond & Pearl': 'dp1',    'Mysterious Treasures': 'dp2', 'Secret Wonders': 'dp3',
+            'Great Encounters': 'dp4',   'Majestic Dawn': 'dp5',       'Legends Awakened': 'dp6',
+            'Stormfront': 'dp7',
+            // Platinum era
+            'Platinum': 'pl1',           'Rising Rivals': 'pl2',      'Supreme Victors': 'pl3',
+            'Arceus': 'pl4',
+            // HeartGold & SoulSilver era
+            'HeartGold & SoulSilver': 'hgss1', 'HeartGold SoulSilver': 'hgss1',
+            'HS Unleashed': 'hgss2',    'Unleashed': 'hgss2',
+            'HS Undaunted': 'hgss3',    'Undaunted': 'hgss3',
+            'HS Triumphant': 'hgss4',   'Triumphant': 'hgss4',
+            'Call of Legends': 'col1',
+            // EX era
+            'EX Ruby & Sapphire': 'ex1', 'Ruby & Sapphire': 'ex1',
+            'EX Sandstorm': 'ex2',       'EX Dragon': 'ex3',
+            'EX Team Magma vs Team Aqua': 'ex4',
+            'EX Hidden Legends': 'ex5',  'EX FireRed & LeafGreen': 'ex6',
+            'EX Team Rocket Returns': 'ex7', 'EX Deoxys': 'ex8',
+            'EX Emerald': 'ex9',         'EX Unseen Forces': 'ex10',
+            'EX Delta Species': 'ex11',  'EX Legend Maker': 'ex12',
+            'EX Holon Phantoms': 'ex13', 'EX Crystal Guardians': 'ex14',
+            'EX Dragon Frontiers': 'ex15', 'EX Power Keepers': 'ex16',
+            // WOTC era
+            'Base Set': 'base1',         'Base': 'base1',
+            'Jungle': 'base2',           'Fossil': 'base3',
+            'Base Set 2': 'base4',       'Team Rocket': 'base5',
+            'Gym Heroes': 'gym1',        'Gym Challenge': 'gym2',
+            'Neo Genesis': 'neo1',       'Neo Discovery': 'neo2',
+            'Neo Revelation': 'neo3',    'Neo Destiny': 'neo4',
+            'Legendary Collection': 'base6',
+            // SWSH Trainer Gallery sub-sets
+            'Brilliant Stars Trainer Gallery': 'swsh9tg',
+            'Astral Radiance Trainer Gallery': 'swsh10tg',
+            'Lost Origin Trainer Gallery': 'swsh11tg',
+            'Silver Tempest Trainer Gallery': 'swsh12tg',
           }
 
           debugInfo.hasApiKey = !!PTCG_API_KEY
@@ -422,7 +464,8 @@ async function _handler(req) {
 
           const ERA_TO_SET_PREFIX = {
             'SV': 'sv', 'SWSH': 'swsh', 'SM': 'sm', 'XY': 'xy',
-            'BW': 'bw', 'HGSS': 'hgss', 'DP': 'dp', 'EX': 'ex', 'NEO': 'neo'
+            'BW': 'bw', 'HGSS': 'hgss', 'DP': 'dp', 'EX': 'ex', 'NEO': 'neo',
+            'PL': 'pl', 'BASE': 'base', 'GYM': 'gym',
           }
 
           const queryPtcg = async (q, size = 10) => {
@@ -638,6 +681,16 @@ async function _handler(req) {
               debugInfo.setIdFromDenom = `denom-only:${_cardDenom}→${_denomImpliedSet}`
             }
 
+            // Trainer Gallery routing: SWSH TG cards (TG01/TG30) are in separate sub-sets
+            // e.g. Brilliant Stars Trainer Gallery = swsh9tg, not swsh9.
+            // Detect TG prefix in the numerator and remap the set.
+            const TG_PARENT_TO_SUB = { 'swsh9': 'swsh9tg', 'swsh10': 'swsh10tg', 'swsh11': 'swsh11tg', 'swsh12': 'swsh12tg' }
+            const _isTGCard = cardNumber && /^TG\d+/i.test(cardNumber.split('/')[0].trim())
+            if (_isTGCard && effectiveSetId && TG_PARENT_TO_SUB[effectiveSetId]) {
+              effectiveSetId = TG_PARENT_TO_SUB[effectiveSetId]
+              debugInfo.tgRouted = `TG card → ${effectiveSetId}`
+            }
+
             if (effectiveSetId && ptcgCardName) {
               const rawNum = cardNumber?.split('/')?.[0]?.trim()
               const strippedNum = rawNum ? rawNum.replace(/^0+(?=\d)/, '') : null
@@ -784,16 +837,52 @@ async function _handler(req) {
               debugInfo.ptcgQ = `name+setId`
             }
 
-            // Pass 3: promo sets (Promo finish or "Promo" in set name)
-            if (!candidates.length && parsedFinish === 'Promo') {
-              candidates = await queryPtcg(`name:"${ptcgCardName}" supertype:Pokémon`)
-              debugInfo.ptcgQ = `promo`
+            // Pass 3: promo — parse promo code to find exact set + number first
+            if (!candidates.length && parsedFinish === 'Promo' && cardNumber) {
+              // Map promo series code → pokemontcg.io set ID
+              const PROMO_CODE_TO_SET = { SVP: 'svp', SWSH: 'swshp', XY: 'xyp', SM: 'smp', BW: 'bwp', DP: 'dpp', HGSS: 'hsp' }
+              const promoMatch = cardNumber.match(/^(SVP|SWSH|XY|SM|BW|DP|HGSS)\s*(?:EN|JP)?\s*(\d+)/i)
+              if (promoMatch) {
+                const promoSetId = PROMO_CODE_TO_SET[promoMatch[1].toUpperCase()]
+                const promoNum = String(parseInt(promoMatch[2], 10))
+                if (promoSetId) {
+                  const directHits = await queryPtcg(`set.id:${promoSetId} number:${promoNum}`, 3)
+                  if (directHits.length) {
+                    candidates = directHits
+                    debugInfo.ptcgQ = `promo-direct:${promoSetId}#${promoNum}`
+                  }
+                }
+              }
+              // Fallback: try all promo sets by name
+              if (!candidates.length) {
+                for (const promoSet of ['svp', 'swshp', 'smp', 'xyp', 'bwp']) {
+                  if (candidates.length) break
+                  const hits = await queryPtcg(`name:"${ptcgCardName}" set.id:${promoSet}`, 5)
+                  if (hits.length) { candidates = hits; debugInfo.ptcgQ = `promo-set:${promoSet}` }
+                }
+              }
+              // Last resort: name only
+              if (!candidates.length) {
+                candidates = await queryPtcg(`name:"${ptcgCardName}" supertype:Pokémon`)
+                debugInfo.ptcgQ = `promo-name`
+              }
             }
 
             // Pass 3c: name + rarity — for premium finishes with wrong/missing number
             if (!candidates.length && parsedFinish && finishRarityQuery[parsedFinish]) {
               candidates = await queryPtcg(`name:"${ptcgCardName}" ${finishRarityQuery[parsedFinish]}`)
               debugInfo.ptcgQ = `name+rarity`
+            }
+
+            // Pass 3d: 1st Edition / Shadowless — WOTC cards with premium variants
+            // These have the same card number as Unlimited but different subtypes in pokemontcg.io.
+            if (!candidates.length && parsedFinish && /1st.edition|shadowless/i.test(parsedFinish)) {
+              const subtype = /shadowless/i.test(parsedFinish) ? 'Shadowless' : '1st Edition'
+              const firstEdHits = await queryPtcg(`name:"${ptcgCardName}" subtypes:"${subtype}"`, 10)
+              if (firstEdHits.length) {
+                candidates = firstEdHits
+                debugInfo.ptcgQ = `1stEd:${subtype}`
+              }
             }
 
             // Pass 4: name only — top 10 newest, pick by rarity/number
@@ -917,6 +1006,13 @@ async function _handler(req) {
             }
           } catch (ptcgErr) {
             debugInfo.ptcgError = ptcgErr.message
+          }
+
+          // Reverse Holo price note: pokemontcg.io does not have separate RH entries.
+          // RH versions typically sell for 1.3–2.5x the non-RH Cardmarket price.
+          // Flag it so the frontend can display an appropriate note.
+          if (parsedFinish === 'Reverse Holo' && catalogPriceEur) {
+            debugInfo.rhNote = `RH price shown is base version — actual RH price ~${(catalogPriceEur * 1.5).toFixed(2)}€ est.`
           }
 
           // Global UR recovery: fires when all set-constrained PTCG passes failed (or were score-gated)
@@ -1176,6 +1272,10 @@ async function _handler(req) {
     debugInfo.setFromHp = 'Mega Evolution (HP>300 + Mega card + ability)'
   }
 
+  if (catalogPriceEur && debugInfo.source === 'ptcg') {
+    debugInfo.priceSource = 'pokemontcg.io/cardmarket (updated weekly — check Cardmarket for live price)'
+  }
+
   debugInfo.aiFinish = _aiFinish
 
   // Log scan i Supabase
@@ -1280,7 +1380,12 @@ Scarlet & Violet era: Scarlet & Violet, Paldea Evolved, Obsidian Flames, 151, Pa
 Mega Evolution era (SV 2025–2026): Mega Evolution, Phantasmal Flames, Ascended Heroes, Perfect Order, Chaos Rising.
 Sword & Shield era: Sword & Shield, Rebel Clash, Darkness Ablaze, Champion's Path, Vivid Voltage, Shining Fates, Battle Styles, Chilling Reign, Evolving Skies, Fusion Strike, Brilliant Stars, Astral Radiance, Lost Origin, Silver Tempest, Crown Zenith.
 Sun & Moon era: Sun & Moon, Guardians Rising, Burning Shadows, Shining Legends, Crimson Invasion, Ultra Prism, Forbidden Light, Celestial Storm, Dragon Majesty, Lost Thunder, Team Up, Unbroken Bonds, Unified Minds, Hidden Fates, Cosmic Eclipse.
-XY era: Evolutions, Steam Siege, Fates Collide, BREAKpoint, BREAKthrough, Ancient Origins, Roaring Skies, Primal Clash, Phantom Forces, Furious Fists, Flashfire, XY.
+XY era: XY, Flashfire, Furious Fists, Phantom Forces, Primal Clash, Roaring Skies, Ancient Origins, BREAKthrough, BREAKpoint, Fates Collide, Steam Siege, Evolutions.
+Black & White era: Black & White, Emerging Powers, Noble Victories, Next Destinies, Dark Explorers, Dragons Exalted, Boundaries Crossed, Plasma Storm, Plasma Freeze, Plasma Blast, Legendary Treasures.
+Diamond & Pearl / Platinum era: Diamond & Pearl, Mysterious Treasures, Secret Wonders, Great Encounters, Majestic Dawn, Legends Awakened, Stormfront, Platinum, Rising Rivals, Supreme Victors, Arceus.
+HeartGold & SoulSilver era: HeartGold & SoulSilver, Unleashed, Undaunted, Triumphant, Call of Legends.
+EX era: EX Ruby & Sapphire, EX Sandstorm, EX Dragon, EX Team Magma vs Team Aqua, EX Hidden Legends, EX FireRed & LeafGreen, EX Team Rocket Returns, EX Deoxys, EX Emerald, EX Unseen Forces, EX Delta Species, EX Legend Maker, EX Holon Phantoms, EX Crystal Guardians, EX Dragon Frontiers, EX Power Keepers.
+WOTC era: Base Set, Jungle, Fossil, Base Set 2, Team Rocket, Gym Heroes, Gym Challenge, Neo Genesis, Neo Discovery, Neo Revelation, Neo Destiny, Legendary Collection.
 - Do NOT return a series name like "Scarlet & Violet Series" — return the exact product name.
 - If Japanese, unreadable, or uncertain → return null. NEVER guess.
 - The set name is printed in plain readable text and is FAR MORE RELIABLE than the card number on premium foil cards. Prioritize reading the set name accurately — it is the single most important field for correct identification.
