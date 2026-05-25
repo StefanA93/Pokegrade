@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, createContext, useContext } from 'react'
+import React, { useState, useEffect, useRef, useMemo, createContext, useContext } from 'react'
 import { createClient } from '@supabase/supabase-js'
 
 // ─── Supabase ────────────────────────────────────────────────────────────────
@@ -92,12 +92,9 @@ const COLORS = {
   success: '#00b894',
 }
 
-function getDailyChange(cardId) {
-  const today = new Date().toISOString().slice(0, 10).replace(/-/g, '')
-  const idHash = (cardId || '').split('').reduce((a, c) => (a * 31 + c.charCodeAt(0)) & 0xffff, 0)
-  const seed = (idHash * 1009 + parseInt(today, 10) * 97) % 10000
-  const raw = ((seed % 161) - 80) / 10
-  return Math.round(raw * 10) / 10
+function getRealTrend(card) {
+  if (!card.value || !card.price_avg30) return null
+  return ((card.value - card.price_avg30) / card.price_avg30) * 100
 }
 
 function getPsaCondition(grade) {
@@ -976,6 +973,8 @@ function GradeResult({ result, game, frontImg, user, onSave }) {
       card_number: result.verifiedNumber || result.cardNumber || null,
       set_name: result.verifiedSetName || result.setName || null,
       catalog_id: result.catalogId || null,
+      price_avg30: result.catalogPriceAvg30 || null,
+      cardmarket_url: result.catalogCardmarketUrl || null,
     })
     if (error) {
       setSaveError(error.message)
@@ -1298,17 +1297,46 @@ function GradeResult({ result, game, frontImg, user, onSave }) {
   )
 }
 
-// SVG AREA CHART
-function generateSparkline(totalValue, n = 20) {
-  const pts = []
-  let v = totalValue * 0.82
-  for (let i = 0; i < n; i++) {
-    v += (Math.random() - 0.42) * totalValue * 0.06
-    v = Math.max(totalValue * 0.7, Math.min(totalValue * 1.1, v))
-    pts.push(v)
+// SVG AREA CHART — real portfolio history from card addition timestamps
+function buildPortfolioHistory(cards, period) {
+  const N = 30
+  const now = Date.now()
+  const MS = { '1D': 86400000, '7D': 604800000, '1M': 2592000000, '3M': 7776000000, '6M': 15552000000 }
+  const sorted = [...cards]
+    .filter(c => c.created_at)
+    .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+  if (!sorted.length) return []
+  const firstT = new Date(sorted[0].created_at).getTime()
+  const windowMs = MS[period] || null
+  const startT = windowMs ? Math.max(now - windowMs, firstT - 1) : firstT - 1
+  const range = now - startT
+  if (range <= 0) return []
+  const points = []
+  for (let i = 0; i < N; i++) {
+    const t = startT + (i / (N - 1)) * range
+    let v = 0
+    for (const c of sorted) {
+      if (new Date(c.created_at).getTime() <= t) v += (c.value || 0)
+    }
+    points.push(v)
   }
-  pts.push(totalValue)
-  return pts
+  return points
+}
+
+function buildDelta(cards, period) {
+  const now = Date.now()
+  const MS = { '1D': 86400000, '7D': 604800000, '1M': 2592000000, '3M': 7776000000, '6M': 15552000000 }
+  const labels = { '1D': '24h', '7D': '7d', '1M': '30d', '3M': '3mo', '6M': '6mo' }
+  const totalNow = cards.reduce((s, c) => s + (c.value || 0), 0)
+  const windowMs = MS[period]
+  if (!windowMs) return { absolute: totalNow, percent: null, isPositive: true, label: 'all time' }
+  const cutoff = now - windowMs
+  const addedInPeriod = cards
+    .filter(c => c.created_at && new Date(c.created_at).getTime() >= cutoff)
+    .reduce((s, c) => s + (c.value || 0), 0)
+  const valueBefore = totalNow - addedInPeriod
+  const percent = valueBefore > 0 ? (addedInPeriod / valueBefore) * 100 : null
+  return { absolute: addedInPeriod, percent, isPositive: addedInPeriod >= 0, label: labels[period] }
 }
 
 function SVGAreaChart({ points, width = 480, height = 160 }) {
@@ -1359,7 +1387,6 @@ function HomeScreen({ user, profile, onGoScan, onViewAll }) {
   const [hideValue, setHideValue] = useState(false)
   const [period, setPeriod] = useState('1M')
   const [homeTab, setHomeTab] = useState('overview')
-  const [chartPoints, setChartPoints] = useState(() => generateSparkline(110))
   const [currency, setCurrency] = useState(() => localStorage.getItem('gradedex_currency') || 'EUR')
 
   function cycleCurrency() {
@@ -1374,24 +1401,29 @@ function HomeScreen({ user, profile, onGoScan, onViewAll }) {
     supabase.from('cards')
       .select('*')
       .eq('user_id', user.id)
-      .order('value', { ascending: false })
+      .order('created_at', { ascending: true })
       .then(({ data }) => {
-        const loaded = data || []
-        setCards(loaded)
-        const tv = loaded.reduce((s, c) => s + (c.value || 0), 0)
-        setChartPoints(generateSparkline(tv || 110))
+        setCards(data || [])
         setLoading(false)
       })
   }, [])
 
   const totalValue = cards.reduce((s, c) => s + (c.value || 0), 0)
   const displayValue = loading ? 0 : totalValue
-  const delta = displayValue * 0.05
-  const topCards = cards.slice(0, 4)
-  const topMovers = [...cards]
-    .map(c => ({ ...c, change: getDailyChange(c.id) }))
-    .sort((a, b) => b.change - a.change)
-    .slice(0, 4)
+  const deltaInfo = useMemo(() => buildDelta(cards, period), [cards, period])
+  const chartPoints = useMemo(() => buildPortfolioHistory(cards, period), [cards, period])
+  const topCards = useMemo(() => [...cards].sort((a, b) => (b.value || 0) - (a.value || 0)).slice(0, 4), [cards])
+  const topMovers = useMemo(() => {
+    const withTrend = cards.map(c => ({ ...c, trend: getRealTrend(c) })).filter(c => c.trend !== null)
+    return withTrend.sort((a, b) => Math.abs(b.trend) - Math.abs(a.trend)).slice(0, 4)
+  }, [cards])
+  const hasTrendData = topMovers.length > 0
+  const uniqueSets = useMemo(() => new Set(cards.filter(c => c.set_name).map(c => c.set_name)).size, [cards])
+  const bestGrade = useMemo(() => {
+    const grades = cards.filter(c => c.grade).map(c => Number(c.grade))
+    return grades.length ? Math.max(...grades) : null
+  }, [cards])
+  const uniqueGames = useMemo(() => new Set(cards.map(c => c.game)).size, [cards])
   const periods = ['1D', '7D', '1M', '3M', '6M', 'MAX']
 
   return (
@@ -1484,8 +1516,16 @@ function HomeScreen({ user, profile, onGoScan, onViewAll }) {
 
         {/* Delta line */}
         {!loading && displayValue > 0 && (
-          <div style={{ fontSize: 13, color: COLORS.success, fontWeight: 600, marginBottom: 16 }}>
-            +{fmtVal(delta)} last 30 days
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 16 }}>
+            <span style={{ fontSize: 13, fontWeight: 700, color: deltaInfo.absolute > 0 ? COLORS.success : deltaInfo.absolute < 0 ? COLORS.danger : COLORS.muted }}>
+              {deltaInfo.absolute > 0 ? '+' : ''}{deltaInfo.absolute !== 0 ? fmtVal(deltaInfo.absolute) : '—'}
+            </span>
+            {deltaInfo.percent !== null && (
+              <span style={{ fontSize: 11, color: COLORS.muted }}>
+                ({deltaInfo.percent > 0 ? '+' : ''}{deltaInfo.percent.toFixed(1)}%)
+              </span>
+            )}
+            <span style={{ fontSize: 11, color: COLORS.muted }}>last {deltaInfo.label}</span>
           </div>
         )}
 
@@ -1564,10 +1604,12 @@ function HomeScreen({ user, profile, onGoScan, onViewAll }) {
             <div style={{ background: '#0d0d14', borderRadius: 16, border: `1px solid rgba(212,175,55,0.35)`, boxShadow: '0 0 18px rgba(212,175,55,0.12), inset 0 1px 0 rgba(212,175,55,0.08)', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
               <div style={{ padding: '14px 14px 10px', fontWeight: 800, fontSize: 13, color: COLORS.text, letterSpacing: 0.1 }}>
                 Top Movers
+                <div style={{ fontSize: 9, color: COLORS.muted, fontWeight: 500, marginTop: 2, letterSpacing: 0 }}>7d vs 30d avg · Cardmarket</div>
                 <div style={{ marginTop: 6, height: 1, width: 80, borderRadius: 2, background: `linear-gradient(to right, ${COLORS.gold}, transparent)` }} />
               </div>
-              {topMovers.map(card => {
-                const changeColor = card.change >= 0 ? COLORS.success : COLORS.danger
+              {hasTrendData ? topMovers.map(card => {
+                const trend = card.trend
+                const changeColor = trend >= 0 ? COLORS.success : COLORS.danger
                 return (
                   <div key={card.id} style={{ padding: '8px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                     <div style={{ flex: 1, minWidth: 0, marginRight: 6 }}>
@@ -1575,12 +1617,12 @@ function HomeScreen({ user, profile, onGoScan, onViewAll }) {
                         {card.name || 'Unknown'}
                       </div>
                       <div style={{ fontSize: 10, color: COLORS.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {[card.finish, card.grade ? `AiGrade ${card.grade}` : null].filter(Boolean).join(' • ') || 'Near Mint'}
+                        {[card.finish, card.set_name].filter(Boolean).join(' • ') || 'Near Mint'}
                       </div>
                     </div>
                     <div style={{ textAlign: 'right', flexShrink: 0 }}>
                       <div style={{ fontSize: 13, color: changeColor, fontWeight: 700, marginBottom: 2 }}>
-                        {card.change >= 0 ? '+' : ''}{card.change.toFixed(2)}%
+                        {trend >= 0 ? '+' : ''}{trend.toFixed(1)}%
                       </div>
                       <div style={{ fontSize: 10, color: COLORS.muted, fontFamily: FONT_VALUE, fontVariantNumeric: 'tabular-nums' }}>
                         {fmtVal(card.value)}
@@ -1588,12 +1630,36 @@ function HomeScreen({ user, profile, onGoScan, onViewAll }) {
                     </div>
                   </div>
                 )
-              })}
+              }) : (
+                <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px 14px', textAlign: 'center' }}>
+                  <div>
+                    <div style={{ fontSize: 10, color: COLORS.muted, lineHeight: 1.5 }}>Rescan cards to see</div>
+                    <div style={{ fontSize: 10, color: COLORS.muted, lineHeight: 1.5 }}>real price trends</div>
+                  </div>
+                </div>
+              )}
               <button onClick={onViewAll} style={{ marginTop: 'auto', padding: '10px 14px', color: COLORS.gold, fontWeight: 700, fontSize: 11, background: 'none', border: 'none', borderTop: '1px solid rgba(255,255,255,0.06)', cursor: 'pointer', width: '100%', textAlign: 'center', letterSpacing: 0.2 }}>
                 View All
               </button>
             </div>
 
+          </div>
+        )}
+
+        {/* Stats row */}
+        {!loading && cards.length > 0 && (
+          <div style={{ display: 'flex', gap: 8, marginBottom: 28, flexWrap: 'wrap' }}>
+            {[
+              { label: 'Cards', value: cards.length },
+              { label: 'Sets', value: uniqueSets || '—' },
+              { label: 'Best Grade', value: bestGrade ? `PSA ${bestGrade}` : '—' },
+              { label: 'Games', value: uniqueGames },
+            ].map(({ label, value }) => (
+              <div key={label} style={{ flex: 1, minWidth: 68, background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: '8px 10px', textAlign: 'center' }}>
+                <div style={{ fontSize: 16, fontWeight: 700, color: COLORS.text, fontFamily: FONT_VALUE, fontVariantNumeric: 'tabular-nums' }}>{value}</div>
+                <div style={{ fontSize: 9, color: COLORS.muted, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 600, marginTop: 2 }}>{label}</div>
+              </div>
+            ))}
           </div>
         )}
 
