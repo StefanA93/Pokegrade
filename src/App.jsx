@@ -714,33 +714,67 @@ function ScanScreen({ user, profile, onScanDone, modelState, modelProgress }) {
     })
   }
 
+  const FREE_DAILY_LIMIT     = 25
+  const AI_CREDITS_PER_DAY  = 10
+  const AI_CREDITS_MAX      = 30
+  const dailyScans = profile?.daily_scans || 0
+  const isFreeLimitReached = !profile?.is_pro && dailyScans >= FREE_DAILY_LIMIT
+
+  function calcAiCredits() {
+    if (!profile?.is_pro) return 0
+    const stored   = profile.ai_grade_credits ?? 0
+    const lastStr  = profile.ai_credits_date
+    if (!lastStr) return AI_CREDITS_PER_DAY
+    const today    = new Date(); today.setHours(0, 0, 0, 0)
+    const last     = new Date(lastStr); last.setHours(0, 0, 0, 0)
+    const days     = Math.max(0, Math.floor((today - last) / 86400000))
+    return Math.min(stored + days * AI_CREDITS_PER_DAY, AI_CREDITS_MAX)
+  }
+  const aiCredits   = calcAiCredits()
+  const canAiGrade  = profile?.is_pro && aiCredits >= 1
+
   async function freeScan() {
     if (!frontImg) { setError('Upload the front of the card first'); return }
+    if (isFreeLimitReached) return
     setLoading(true); setError('')
     try {
-      const { data: { session } } = await supabase.auth.getSession()
-      const token = session?.access_token
-      if (!token) { setError('Not signed in — please reload'); setLoading(false); return }
+      // Beregn phash client-side — ingen server-roundtrip for selve hashen
+      const { computePhash } = await import('./recognition/phash.js')
+      const phash = await computePhash(frontImg)
 
-      const blob = await fetch(frontImg).then(r => r.blob())
-      const formData = new FormData()
-      formData.append('file', blob, 'card.jpg')
-
-      const res = await fetch(`${API_URL}/api/v1/scan?game=${game}`, {
+      const res = await fetch('/api/phash-match', {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-        body: formData,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phash, game }),
       })
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({}))
-        throw new Error(err.error?.message || `Server error ${res.status}`)
+        throw new Error(err.error || `Server fejl ${res.status}`)
       }
 
       const data = await res.json()
-      setResult({ type: 'free', ...data })
+
+      // Normalisér kandidater: finish_types (DB snake_case) → finishTypes (UI camelCase)
+      const mapCard = c => ({ ...c, finishTypes: c.finish_types || ['Normal'] })
+      const candidates  = (data.candidates || []).map(mapCard)
+      const autoMatched = data.confidence === 'high'
+      const confidence  = candidates[0]?.similarity ?? 0
+
+      setResult({
+        type: 'free',
+        autoMatched,
+        match:      autoMatched ? candidates[0] : null,
+        candidates,
+        confidence,
+        ocrText:    null,
+      })
+
+      const today = new Date().toISOString().slice(0, 10)
+      await supabase.from('scan_logs').insert({ user_id: user.id, scan_date: today, game })
+      onScanDone()
     } catch (e) {
-      setError(e.message || 'Free scan failed — is the server running?')
+      setError(e.message || 'Free scan fejlede — prøv igen')
     } finally {
       setLoading(false)
     }
@@ -830,7 +864,9 @@ function ScanScreen({ user, profile, onScanDone, modelState, modelProgress }) {
     setLoading(false)
   }
 
-  const scansLeft = profile?.is_pro ? `${30 - (profile?.daily_scans || 0)} today` : `${3 - (profile?.total_scans || 0)} free left`
+  const freeScanLabel = profile?.is_pro ? 'Unlimited' : `${Math.max(0, FREE_DAILY_LIMIT - dailyScans)}/${FREE_DAILY_LIMIT} today`
+  const aiGradeLabel  = profile?.is_pro ? `${aiCredits}/${AI_CREDITS_MAX} Ai Scans` : 'Pro only'
+  const TC = scanMode === 'free' ? COLORS.success : COLORS.gold
 
   return (
     <div style={{ padding: '16px 16px 100px', maxWidth: 480, margin: '0 auto' }}>
@@ -838,70 +874,107 @@ function ScanScreen({ user, profile, onScanDone, modelState, modelProgress }) {
       <input ref={frontRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={e => handleFile(e, 'front')} />
       <input ref={backRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={e => handleFile(e, 'back')} />
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, paddingTop: 8 }}>
-        <div>
-          <h2 style={{ fontWeight: 900, fontSize: 20, letterSpacing: -0.3 }}>Scan Card</h2>
-          <div style={{ fontSize: 11, color: COLORS.muted, fontWeight: 500, marginTop: 1 }}>
-            {scanMode === 'free' ? 'Identify card instantly — free & unlimited' : 'AI grades your card condition'}
-          </div>
-        </div>
-        <Badge color={profile?.is_pro ? COLORS.gold : COLORS.muted}>{profile?.is_pro ? 'PRO' : scansLeft}</Badge>
-      </div>
 
-      {/* Scan mode selector */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 20, background: COLORS.card, borderRadius: 14, padding: 4, border: `1px solid ${COLORS.border}` }}>
+      {/* Scan mode selector — store kort med ikon til venstre */}
+      <div style={{ display: 'flex', gap: 10, marginBottom: 24, paddingTop: 8 }}>
         {[
-          { id: 'free', label: '⚡ Free Scan', desc: 'Unlimited' },
-          { id: 'ai',   label: '🤖 AI Grade',  desc: scansLeft },
-        ].map(m => (
-          <button key={m.id} onClick={() => { setScanMode(m.id); setResult(null); setError('') }} style={{
-            flex: 1, padding: '10px 8px', borderRadius: 10,
-            background: scanMode === m.id ? (m.id === 'free' ? COLORS.success + '18' : COLORS.gold + '18') : 'transparent',
-            border: `1.5px solid ${scanMode === m.id ? (m.id === 'free' ? COLORS.success : COLORS.gold) : 'transparent'}`,
-            color: scanMode === m.id ? (m.id === 'free' ? COLORS.success : COLORS.gold) : COLORS.muted,
-            fontWeight: 700, fontSize: 13, cursor: 'pointer', transition: 'all .15s',
-            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
-          }}>
-            <span>{m.label}</span>
-            <span style={{ fontSize: 10, fontWeight: 500, opacity: 0.8 }}>{m.desc}</span>
-          </button>
-        ))}
+          {
+            id: 'free',
+            title: 'Free Scan',
+            subtitle: freeScanLabel,
+            color: COLORS.success,
+            icon: (
+              <svg width="26" height="26" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+              </svg>
+            ),
+          },
+          {
+            id: 'ai',
+            title: 'GradeDex Ai',
+            subtitle: aiGradeLabel,
+            color: COLORS.muted,
+            icon: (
+              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="8" width="18" height="11" rx="2"/>
+                <path d="M7 8V6a5 5 0 0 1 10 0v2"/>
+                <circle cx="9" cy="13" r="1.2" fill="currentColor"/>
+                <circle cx="15" cy="13" r="1.2" fill="currentColor"/>
+                <path d="M9 17h6"/>
+              </svg>
+            ),
+          },
+        ].map(m => {
+          const active = scanMode === m.id
+          const isFree = m.id === 'free'
+          return (
+            <button key={m.id} onClick={() => { setScanMode(m.id); setResult(null); setError('') }} style={{
+              flex: 1, padding: '18px 16px', borderRadius: 18,
+              background: active
+                ? (isFree
+                    ? 'linear-gradient(145deg, #0e4035 0%, #071f18 100%)'
+                    : 'linear-gradient(145deg, #2e2308 0%, #1a1404 100%)')
+                : 'linear-gradient(145deg, #0d0d14 0%, #09090f 100%)',
+              border: 'none',
+              display: 'flex', alignItems: 'center', gap: 14,
+              cursor: 'pointer', transition: 'all .22s',
+              boxShadow: active
+                ? (isFree
+                    ? '0 4px 24px rgba(0,100,70,0.25), inset 0 1px 0 rgba(255,255,255,0.06)'
+                    : `0 4px 24px rgba(212,175,55,0.18), inset 0 1px 0 rgba(255,255,255,0.06)`)
+                : 'inset 0 1px 0 rgba(255,255,255,0.03)',
+            }}>
+              <div style={{
+                flexShrink: 0,
+                color: active ? (isFree ? '#fff' : COLORS.gold) : COLORS.muted,
+                display: 'flex', alignItems: 'center',
+                transition: 'color .22s',
+              }}>
+                {m.icon}
+              </div>
+              <div style={{ textAlign: 'left' }}>
+                <div style={{ fontWeight: 800, fontSize: 17, color: active ? '#fff' : COLORS.muted, lineHeight: 1.2, letterSpacing: -0.2 }}>{m.title}</div>
+                <div style={{ fontSize: 13, color: active ? (isFree ? 'rgba(255,255,255,0.55)' : `${COLORS.gold}99`) : '#44444f', fontWeight: 500, marginTop: 3 }}>{m.subtitle}</div>
+              </div>
+            </button>
+          )
+        })}
       </div>
 
-      {/* Game selector */}
-      <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 4, marginBottom: 20, scrollbarWidth: 'none' }}>
+      {/* Game selector — større pills med label under aktiv logo */}
+      <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 4, marginBottom: 22, scrollbarWidth: 'none' }}>
         {GAMES.map(g => {
           const active = game === g.id
           return (
             <button key={g.id} onClick={() => setGame(g.id)} style={{
               flexShrink: 0,
-              padding: '8px 10px',
-              borderRadius: 14,
-              background: active ? g.color + '18' : COLORS.card,
-              border: `1.5px solid ${active ? g.color : COLORS.border}`,
-              color: active ? g.color : COLORS.muted,
+              padding: '10px 12px',
+              borderRadius: 16,
+              background: active ? `${TC}18` : COLORS.card,
+              border: 'none',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              minWidth: 58,
-              boxShadow: active ? `0 0 14px ${g.color}28` : 'none',
-              transition: 'all .15s',
+              minWidth: 70,
+              boxShadow: active ? `0 0 16px ${TC}20` : 'none',
+              transition: 'all .22s',
+              cursor: 'pointer',
             }}>
-              <div style={{ height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <div style={{ height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 {!logoErrs[g.id] ? (
                   <img
                     src={GAME_LOGOS[g.id]}
                     alt={g.label}
                     onError={() => setLogoErrs(e => ({ ...e, [g.id]: true }))}
                     style={{
-                      height: 32, width: 'auto', maxWidth: 58,
+                      height: 36, width: 'auto', maxWidth: 70,
                       objectFit: 'contain',
-                      opacity: active ? 1 : 0.45,
-                      filter: active ? 'none' : 'grayscale(30%)',
+                      opacity: active ? 1 : 0.4,
+                      filter: active ? 'none' : 'grayscale(40%)',
                       transition: 'opacity .15s, filter .15s',
                     }}
                   />
                 ) : (
-                  <div style={{ color: active ? g.color : COLORS.muted }}>
-                    {React.cloneElement(g.logo, { width: 28, height: 28 })}
+                  <div style={{ color: active ? COLORS.success : COLORS.muted }}>
+                    {React.cloneElement(g.logo, { width: 30, height: 30 })}
                   </div>
                 )}
               </div>
@@ -910,40 +983,62 @@ function ScanScreen({ user, profile, onScanDone, modelState, modelProgress }) {
         })}
       </div>
 
-      {/* Image upload */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
-        {[{ label: 'Front', key: 'front', img: frontImg }, { label: 'Back (optional)', key: 'back', img: backImg }].map(({ label, key, img }) => (
+      {/* Image upload — kun front ved Free Scan, begge ved AI Grade */}
+      <div style={{ display: 'grid', gridTemplateColumns: scanMode === 'free' ? '1fr' : '1fr 1fr', gap: 12, marginBottom: 16 }}>
+        {(scanMode === 'free'
+          ? [{ label: 'Front', key: 'front', img: frontImg }]
+          : [{ label: 'Front', key: 'front', img: frontImg }, { label: 'Back (optional)', key: 'back', img: backImg }]
+        ).map(({ label, key, img }) => (
           <button key={key} onClick={() => pickImage(key)} style={{
-            aspectRatio: '3/4', borderRadius: 16,
-            border: img ? `1.5px solid ${COLORS.gold}60` : `1.5px solid ${COLORS.border}`,
-            background: img ? 'transparent' : `linear-gradient(145deg, ${COLORS.card}, #090910)`,
-            boxShadow: img ? `0 0 16px ${COLORS.gold}18` : 'none',
+            aspectRatio: scanMode === 'free' ? '3/4' : '2/2.6',
+            width: scanMode === 'free' ? '62%' : '100%',
+            margin: scanMode === 'free' ? '0 auto' : undefined,
+            borderRadius: 18,
+            border: img ? `2px solid ${TC}80` : `1.5px solid ${COLORS.border}`,
+            background: '#0d0d14',
+            boxShadow: img ? `0 0 20px ${TC}20` : 'none',
             overflow: 'hidden', position: 'relative',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 8,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 10,
+            cursor: 'pointer',
           }}>
             {img ? (
               <>
                 <img src={img} alt={label} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                <div style={{ position: 'absolute', bottom: 8, right: 8, background: COLORS.success, borderRadius: '50%', width: 20, height: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, boxShadow: '0 2px 8px rgba(0,0,0,0.4)' }}>✓</div>
+                <div style={{ position: 'absolute', bottom: 10, right: 10, background: TC, borderRadius: '50%', width: 22, height: 22, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, boxShadow: '0 2px 8px rgba(0,0,0,0.5)' }}>✓</div>
               </>
             ) : (
               <>
+                {/* Corner markers — følger tema-farve */}
                 {[
-                  { outer: {top:6,left:6},     inner: {top:0,left:0} },
-                  { outer: {top:6,right:6},    inner: {top:0,right:0} },
-                  { outer: {bottom:6,left:6},  inner: {bottom:0,left:0} },
-                  { outer: {bottom:6,right:6}, inner: {bottom:0,right:0} },
-                ].map(({ outer, inner }, i) => (
-                  <div key={i} style={{ position: 'absolute', width: 14, height: 14, ...outer, pointerEvents: 'none' }}>
-                    <div style={{ position: 'absolute', width: '100%', height: 2, background: `${COLORS.gold}88`, ...inner }} />
-                    <div style={{ position: 'absolute', width: 2, height: '100%', background: `${COLORS.gold}88`, ...inner }} />
-                  </div>
-                ))}
-                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={COLORS.muted} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                  { top: 12, left: 12 },
+                  { top: 12, right: 12 },
+                  { bottom: 12, left: 12 },
+                  { bottom: 12, right: 12 },
+                ].map((pos, i) => {
+                  const isRight = 'right' in pos
+                  const isBottom = 'bottom' in pos
+                  return (
+                    <div key={i} style={{ position: 'absolute', width: 16, height: 16, ...pos, pointerEvents: 'none' }}>
+                      <div style={{
+                        position: 'absolute', height: 1.5, background: TC, borderRadius: 1,
+                        width: '100%',
+                        top: isBottom ? 'auto' : 0, bottom: isBottom ? 0 : 'auto',
+                        left: isRight ? 'auto' : 0, right: isRight ? 0 : 'auto',
+                      }} />
+                      <div style={{
+                        position: 'absolute', width: 1.5, background: TC, borderRadius: 1,
+                        height: '100%',
+                        top: isBottom ? 'auto' : 0, bottom: isBottom ? 0 : 'auto',
+                        left: isRight ? 'auto' : 0, right: isRight ? 0 : 'auto',
+                      }} />
+                    </div>
+                  )
+                })}
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke={COLORS.muted} strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.5 }}>
                   <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
                   <circle cx="12" cy="13" r="4"/>
                 </svg>
-                <span style={{ color: COLORS.muted, fontSize: 11, fontWeight: 600, letterSpacing: 0.3 }}>{label}</span>
+                <span style={{ color: '#44444f', fontSize: 13, fontWeight: 600 }}>{label}</span>
               </>
             )}
           </button>
@@ -952,34 +1047,128 @@ function ScanScreen({ user, profile, onScanDone, modelState, modelProgress }) {
 
       {error && <p style={{ color: COLORS.danger, fontSize: 13, marginBottom: 12, textAlign: 'center' }}>{error}</p>}
 
+      {/* Scan-knap — logik per mode */}
       {scanMode === 'free' ? (
-        <Btn onClick={freeScan} disabled={loading || !frontImg} style={{ background: loading ? COLORS.success + '99' : COLORS.success }}>
-          {loading ? <><Spinner size={18} color="#0a0a12" /> Scanning...</> : '⚡ Free Scan'}
-        </Btn>
+        isFreeLimitReached ? (
+          <div style={{
+            borderRadius: 20, padding: '20px',
+            background: 'linear-gradient(145deg, #0e2218 0%, #07150e 100%)',
+            border: `1px solid ${COLORS.success}33`,
+            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10,
+            boxShadow: `0 4px 28px ${COLORS.success}12`,
+          }}>
+            <div style={{ fontWeight: 900, fontSize: 16, color: COLORS.text, textAlign: 'center' }}>Daglig grænse nået</div>
+            <div style={{ fontSize: 13, color: COLORS.muted, textAlign: 'center', lineHeight: 1.55 }}>
+              Du har brugt dine <span style={{ color: COLORS.success, fontWeight: 700 }}>{FREE_DAILY_LIMIT} gratis scans</span> for i dag.
+            </div>
+            <button onClick={() => window.open(STRIPE_URL, '_blank')} style={{
+              marginTop: 4, width: '100%', height: 52, borderRadius: 16,
+              background: `linear-gradient(135deg, ${COLORS.goldLight} 0%, ${COLORS.gold} 50%, ${COLORS.goldDark} 100%)`,
+              border: 'none', cursor: 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+              color: '#06060a', fontWeight: 800, fontSize: 16, fontFamily: 'inherit',
+              boxShadow: `0 4px 20px ${COLORS.gold}40`,
+            }}>⚡ Opgrader til Pro — 4.99€/md</button>
+            <div style={{ fontSize: 11, color: '#44444f' }}>Prøv igen i morgen, eller gå Pro nu</div>
+          </div>
+        ) : (
+          <button onClick={!loading && frontImg ? freeScan : undefined} disabled={loading || !frontImg} style={{
+            width: '100%', height: 60, borderRadius: 18,
+            background: loading || !frontImg ? 'rgba(0,184,148,0.25)' : 'linear-gradient(135deg, #00c49a 0%, #009678 100%)',
+            border: 'none', cursor: loading || !frontImg ? 'not-allowed' : 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
+            color: '#fff', fontWeight: 800, fontSize: 18, letterSpacing: -0.2, fontFamily: 'inherit',
+            boxShadow: loading || !frontImg ? 'none' : '0 4px 20px rgba(0,198,154,0.3)',
+            transition: 'all .18s',
+          }}>
+            {loading ? (<><Spinner size={20} color="#fff" /> Scanning…</>) : (
+              <><svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>Free Scan</>
+            )}
+          </button>
+        )
+      ) : !profile?.is_pro ? (
+        /* AI Grade — kræver Pro */
+        <div style={{
+          borderRadius: 20, padding: '20px',
+          background: 'linear-gradient(145deg, #1a1404 0%, #0f0d02 100%)',
+          border: `1px solid ${COLORS.gold}33`,
+          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10,
+          boxShadow: `0 4px 28px ${COLORS.gold}18`,
+        }}>
+          <div style={{ fontWeight: 900, fontSize: 16, color: COLORS.text, textAlign: 'center' }}>AI Grade er Pro-eksklusivt</div>
+          <div style={{ fontSize: 13, color: COLORS.muted, textAlign: 'center', lineHeight: 1.55 }}>
+            Få <span style={{ color: COLORS.gold, fontWeight: 700 }}>10 AI Grade kreditter/dag</span> — akkumulerer op til 30.{'\n'}Perfekt til events og store samlinger.
+          </div>
+          <button onClick={() => window.open(STRIPE_URL, '_blank')} style={{
+            marginTop: 4, width: '100%', height: 52, borderRadius: 16,
+            background: `linear-gradient(135deg, ${COLORS.goldLight} 0%, ${COLORS.gold} 50%, ${COLORS.goldDark} 100%)`,
+            border: 'none', cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+            color: '#06060a', fontWeight: 800, fontSize: 16, fontFamily: 'inherit',
+            boxShadow: `0 4px 20px ${COLORS.gold}40`,
+          }}>⚡ Opgrader til Pro — 4.99€/md</button>
+        </div>
+      ) : aiCredits < 1 ? (
+        /* Pro men ingen kreditter */
+        <div style={{
+          borderRadius: 20, padding: '20px',
+          background: 'linear-gradient(145deg, #1a1404 0%, #0f0d02 100%)',
+          border: `1px solid ${COLORS.gold}22`,
+          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8,
+        }}>
+          <div style={{ fontWeight: 900, fontSize: 16, color: COLORS.text, textAlign: 'center' }}>Ingen kreditter tilbage</div>
+          <div style={{ fontSize: 13, color: COLORS.muted, textAlign: 'center', lineHeight: 1.55 }}>
+            Du får <span style={{ color: COLORS.gold, fontWeight: 700 }}>{AI_CREDITS_PER_DAY} nye kreditter i morgen</span> — de akkumulerer op til {AI_CREDITS_MAX}.
+          </div>
+        </div>
       ) : (
-        <Btn onClick={analyze} disabled={loading || !frontImg}>
-          {loading ? <><Spinner size={18} color="#0a0a12" /> Analyzing...</> : '🤖 AI Grade Card'}
-        </Btn>
+        /* Pro med kreditter — vis knap */
+        <button onClick={!loading && frontImg ? analyze : undefined} disabled={loading || !frontImg} style={{
+          width: '100%', height: 60, borderRadius: 18,
+          background: loading || !frontImg
+            ? `${COLORS.gold}30`
+            : `linear-gradient(135deg, ${COLORS.goldLight} 0%, ${COLORS.gold} 50%, ${COLORS.goldDark} 100%)`,
+          border: 'none', cursor: loading || !frontImg ? 'not-allowed' : 'pointer',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
+          color: loading || !frontImg ? COLORS.gold : '#06060a',
+          fontWeight: 800, fontSize: 18, letterSpacing: -0.2, fontFamily: 'inherit',
+          boxShadow: loading || !frontImg ? 'none' : `0 4px 20px ${COLORS.gold}40`,
+          transition: 'all .18s',
+        }}>
+          {loading ? (<><Spinner size={20} color={COLORS.gold} /> Analyzing…</>) : (
+            <>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="8" width="18" height="11" rx="2"/>
+                <path d="M7 8V6a5 5 0 0 1 10 0v2"/>
+                <circle cx="9" cy="13" r="1" fill="currentColor"/>
+                <circle cx="15" cy="13" r="1" fill="currentColor"/>
+              </svg>
+              GradeDex Ai Scan
+            </>
+          )}
+        </button>
       )}
 
       {/* Vision model status */}
       {modelState === 'loading' && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, padding: '8px 14px', borderRadius: 20, background: `${COLORS.card}`, border: `1px solid ${COLORS.border}`, justifyContent: 'center' }}>
-          <Spinner size={11} color={COLORS.gold} />
-          <span style={{ fontSize: 11, color: COLORS.muted, fontWeight: 600 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12, padding: '10px 16px', borderRadius: 14, background: COLORS.card, border: `1px solid ${COLORS.border}`, justifyContent: 'center' }}>
+          <Spinner size={12} color={TC} />
+          <span style={{ fontSize: 12, color: COLORS.muted, fontWeight: 600 }}>
             Loading vision model{modelProgress > 0 ? ` · ${modelProgress}%` : '…'}
           </span>
           {modelProgress > 0 && (
             <div style={{ width: 48, height: 3, borderRadius: 2, background: COLORS.border, overflow: 'hidden', flexShrink: 0 }}>
-              <div style={{ height: '100%', width: `${modelProgress}%`, background: `linear-gradient(90deg, ${COLORS.gold}88, ${COLORS.gold})`, borderRadius: 2, transition: 'width .3s ease' }} />
+              <div style={{ height: '100%', width: `${modelProgress}%`, background: `linear-gradient(90deg, ${TC}88, ${TC})`, borderRadius: 2, transition: 'width .3s ease' }} />
             </div>
           )}
         </div>
       )}
       {modelState === 'ready' && (
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 10, padding: '7px 14px', borderRadius: 20, background: `${COLORS.success}10`, border: `1px solid ${COLORS.success}25` }}>
-          <span style={{ color: COLORS.success, fontSize: 12 }}>✦</span>
-          <span style={{ fontSize: 11, fontWeight: 700, color: COLORS.success, letterSpacing: 0.3 }}>Vision model ready</span>
+        <div style={{ display: 'flex', justifyContent: 'center', marginTop: 14 }}>
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '5px 12px', borderRadius: 20, background: `${TC}0d` }}>
+            <div style={{ width: 5, height: 5, borderRadius: '50%', background: TC, opacity: 0.7, flexShrink: 0 }} />
+            <span style={{ fontSize: 11, fontWeight: 500, color: `${TC}99`, letterSpacing: 0.3 }}>Vision model ready</span>
+          </div>
         </div>
       )}
 
@@ -1015,7 +1204,7 @@ function FreeScanResult({ result, game, frontImg, user, onSave, onSwitchToAI }) 
   async function save() {
     if (!selected) return
     setSaving(true)
-    const { error } = await supabase.from('cards').insert({
+    const base = {
       user_id:       user.id,
       name:          selected.name,
       game,
@@ -1030,7 +1219,12 @@ function FreeScanResult({ result, game, frontImg, user, onSave, onSwitchToAI }) 
       card_number:   selected.number      || null,
       set_name:      selected.set_name    || null,
       catalog_id:    selected.id          || null,
-    })
+    }
+    let { error } = await supabase.from('cards').insert({ ...base, rarity: selected.rarity || null })
+    if (error?.code === '42703') {
+      const res = await supabase.from('cards').insert(base)
+      error = res.error
+    }
     setSaving(false)
     if (error) { setSaveError(error.message); return }
     setSaved(true)
@@ -1184,12 +1378,12 @@ function GradeResult({ result, game, frontImg, user, onSave }) {
     const parsedValueNum = nums.length >= 2 ? (nums[0] + nums[1]) / 2 : nums[0] || null
     const valueNum = result.catalogPriceEur || parsedValueNum || null
 
-    const { error } = await supabase.from('cards').insert({
+    const gradeBase = {
       user_id: user.id,
       name: result.cardName || result.name || result.kortNavn || null,
       game,
       grade: psaGrade?.grade ?? 7,
-      finish: result.verifiedRarity || result.finish || null,
+      finish: result.finish || null,
       value: valueNum,
       price_range: result.estimatedRawValue || result.estimatedPSAValue || null,
       image_url: result.officialImageUrl || imageUrl,
@@ -1199,7 +1393,12 @@ function GradeResult({ result, game, frontImg, user, onSave }) {
       catalog_id: result.catalogId || null,
       price_avg30: result.catalogPriceAvg30 || null,
       cardmarket_url: result.catalogCardmarketUrl || null,
-    })
+    }
+    let { error } = await supabase.from('cards').insert({ ...gradeBase, rarity: result.verifiedRarity || null })
+    if (error?.code === '42703') {
+      const res = await supabase.from('cards').insert(gradeBase)
+      error = res.error
+    }
     if (error) {
       setSaveError(error.message)
       setSaving(false)
@@ -1794,7 +1993,7 @@ function HomeScreen({ user, profile, onGoScan, onViewAll }) {
                 <div style={{ marginTop: 6, height: 1, width: 80, borderRadius: 2, background: `linear-gradient(to right, ${COLORS.gold}, transparent)` }} />
               </div>
               {topCards.map(card => {
-                const dailyChange = getDailyChange(card.id)
+                const dailyChange = getRealTrend(card) ?? 0
                 const changeColor = dailyChange >= 0 ? COLORS.success : COLORS.danger
                 const condition = getPsaCondition(card.grade)
                 const meta = [card.set_name || condition, card.finish].filter(Boolean).join(' • ')
@@ -1832,7 +2031,7 @@ function HomeScreen({ user, profile, onGoScan, onViewAll }) {
                 <div style={{ marginTop: 6, height: 1, width: 80, borderRadius: 2, background: `linear-gradient(to right, ${COLORS.gold}, transparent)` }} />
               </div>
               {hasTrendData ? topMovers.map(card => {
-                const trend = card.trend
+                const trend = card.trend ?? 0
                 const changeColor = trend >= 0 ? COLORS.success : COLORS.danger
                 return (
                   <div key={card.id} style={{ padding: '8px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -1922,6 +2121,7 @@ function CollectionScreen({ user, initialGame, onClearFilter }) {
   const [sortBy, setSortBy] = useState('newest')
   const [dbError, setDbError] = useState('')
   const [currency, setCurrency] = useState(() => localStorage.getItem('gradedex_currency') || 'EUR')
+  const [logoErrs, setLogoErrs] = useState({})
 
   const fmtVal = (val) => formatCurrency(val, currency)
 
@@ -1943,7 +2143,11 @@ function CollectionScreen({ user, initialGame, onClearFilter }) {
 
   const filtered = cards
     .filter(c => filterGame === 'all' || c.game === filterGame)
-    .filter(c => !search || c.name?.toLowerCase().includes(search.toLowerCase()))
+    .filter(c => {
+      if (!search) return true
+      const s = search.toLowerCase()
+      return c.name?.toLowerCase().includes(s) || c.set_name?.toLowerCase().includes(s) || c.card_number?.toLowerCase().includes(s)
+    })
     .sort((a, b) => {
       if (sortBy === 'newest') return new Date(b.created_at) - new Date(a.created_at)
       if (sortBy === 'grade') return (b.grade || 0) - (a.grade || 0)
@@ -1956,30 +2160,24 @@ function CollectionScreen({ user, initialGame, onClearFilter }) {
   return (
     <div style={{ paddingBottom: 100, maxWidth: 480, margin: '0 auto' }}>
 
-      {/* Search bar at very top */}
-      <div style={{ padding: '16px 16px 12px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 50, padding: '10px 16px' }}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={COLORS.muted} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      {/* Search bar */}
+      <div style={{ padding: '16px 16px 0' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, background: COLORS.card, borderRadius: 50, border: `1px solid ${COLORS.border}`, padding: '0 16px', height: 48 }}>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={COLORS.muted} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
           <input
             placeholder="Search collection..."
             value={search}
             onChange={e => setSearch(e.target.value)}
-            style={{ flex: 1, background: 'none', border: 'none', color: COLORS.text, fontSize: 15, outline: 'none', minWidth: 0 }}
+            style={{ flex: 1, background: 'none', border: 'none', outline: 'none', color: COLORS.text, fontSize: 15 }}
           />
           {search && (
-            <button onClick={() => setSearch('')} style={{ color: COLORS.muted, fontSize: 18, lineHeight: 1, background: 'none', border: 'none', cursor: 'pointer', padding: 0, flexShrink: 0 }}>×</button>
+            <button onClick={() => setSearch('')} style={{ background: 'none', border: 'none', color: COLORS.muted, fontSize: 18, cursor: 'pointer', padding: 0, lineHeight: 1 }}>✕</button>
           )}
-          <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: COLORS.muted, flexShrink: 0, display: 'flex', alignItems: 'center', padding: 0 }} aria-label="Favorites">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
-          </button>
-          <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: COLORS.muted, flexShrink: 0, display: 'flex', alignItems: 'center', padding: 0 }} aria-label="Filter by game">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="4" y1="6" x2="20" y2="6"/><line x1="8" y1="12" x2="16" y2="12"/><line x1="12" y1="18" x2="12" y2="18" strokeWidth="3"/></svg>
-          </button>
         </div>
       </div>
 
       {/* Portfolio label + value */}
-      <div style={{ padding: '0 16px 16px', textAlign: 'center' }}>
+      <div style={{ padding: '10px 16px 16px', textAlign: 'center' }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, justifyContent: 'center', marginBottom: 4 }}>
           <span style={{ fontSize: 13, color: COLORS.muted, fontWeight: 600 }}>Portfolio:</span>
           <span style={{ fontSize: 13, color: COLORS.gold, fontWeight: 800 }}>My Collection</span>
@@ -2032,14 +2230,23 @@ function CollectionScreen({ user, initialGame, onClearFilter }) {
       </div>
 
       <div style={{ padding: '0 16px' }}>
-        {/* Game filter pills */}
+        {/* Game filter */}
         <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 8, marginBottom: 10, scrollbarWidth: 'none' }}>
-          <button onClick={() => setFilterGame('all')} style={{ flexShrink: 0, padding: '7px 16px', borderRadius: 20, background: filterGame === 'all' ? COLORS.gold : COLORS.card, border: `1.5px solid ${filterGame === 'all' ? COLORS.gold : COLORS.border}`, color: filterGame === 'all' ? '#080808' : COLORS.muted, fontWeight: 700, fontSize: 13 }}>All</button>
-          {GAMES.map(g => (
-            <button key={g.id} onClick={() => setFilterGame(g.id)} style={{ flexShrink: 0, padding: '7px 14px', borderRadius: 20, background: filterGame === g.id ? g.color + '33' : COLORS.card, border: `1.5px solid ${filterGame === g.id ? g.color : COLORS.border}`, color: filterGame === g.id ? g.color : COLORS.muted, fontWeight: 700, fontSize: 13 }}>
-              {g.emoji} {g.label}
-            </button>
-          ))}
+          <button onClick={() => setFilterGame('all')} style={{ flexShrink: 0, padding: '8px 16px', borderRadius: 14, background: filterGame === 'all' ? COLORS.gold : COLORS.card, border: `1.5px solid ${filterGame === 'all' ? COLORS.gold : COLORS.border}`, color: filterGame === 'all' ? '#080808' : COLORS.muted, fontWeight: 700, fontSize: 13, transition: 'all .15s' }}>All</button>
+          {GAMES.map(g => {
+            const active = filterGame === g.id
+            return (
+              <button key={g.id} onClick={() => setFilterGame(g.id)} style={{ flexShrink: 0, padding: '8px 10px', borderRadius: 14, background: active ? g.color + '18' : COLORS.card, border: `1.5px solid ${active ? g.color : COLORS.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', minWidth: 58, boxShadow: active ? `0 0 14px ${g.color}28` : 'none', transition: 'all .15s', cursor: 'pointer' }}>
+                <div style={{ height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  {!logoErrs[g.id] ? (
+                    <img src={GAME_LOGOS[g.id]} alt={g.label} onError={() => setLogoErrs(e => ({ ...e, [g.id]: true }))} style={{ height: 32, width: 'auto', maxWidth: 58, objectFit: 'contain', opacity: active ? 1 : 0.45, filter: active ? 'none' : 'grayscale(30%)', transition: 'opacity .15s, filter .15s' }} />
+                  ) : (
+                    <div style={{ color: active ? g.color : COLORS.muted }}>{React.cloneElement(g.logo, { width: 28, height: 28 })}</div>
+                  )}
+                </div>
+              </button>
+            )
+          })}
         </div>
 
         {/* Sort pills */}
@@ -2083,15 +2290,15 @@ function CollectionScreen({ user, initialGame, onClearFilter }) {
 
 function CardItem({ card, onDelete, fmtVal = formatEur, currency = 'EUR' }) {
   const game = GAMES.find(g => g.id === card.game)
-  const conditionLabel = getPsaCondition(card.grade)
-  const conditionColor = getPsaConditionColor(card.grade)
-  const dailyChange = getDailyChange(card.id)
-  const changeColor = dailyChange >= 0 ? COLORS.success : COLORS.danger
+  const trendPct = getRealTrend(card)
+  const hasTrend = trendPct !== null
+  const trendUp = hasTrend && trendPct >= 0
+  const trendColor = trendUp ? COLORS.success : COLORS.danger
   const [showDelete, setShowDelete] = useState(false)
 
   const rate = EXCHANGE_RATES[currency] ?? 1
   const displayValue = card.value ? card.value * rate : null
-  const absChange = displayValue ? Math.abs(displayValue * dailyChange / 100) : 0
+  const absChange = displayValue && hasTrend ? Math.abs(displayValue * trendPct / 100) : 0
 
   function fmtAbs(val) {
     if (!val && val !== 0) return '—'
@@ -2103,83 +2310,131 @@ function CardItem({ card, onDelete, fmtVal = formatEur, currency = 'EUR' }) {
     if (!error) onDelete()
   }
 
+  const conditionLine = [card.condition, card.finish].filter(Boolean).join(' • ')
+
+  function rarityColor(rarity) {
+    if (!rarity) return { bg: 'rgba(255,255,255,0.06)', text: COLORS.muted }
+    const r = rarity.toLowerCase()
+    if (r.includes('hyper') || r.includes('rainbow'))          return { bg: 'rgba(200,130,255,0.18)', text: '#d4a0ff' }
+    if (r.includes('special illustration') || r.includes('sir')) return { bg: 'rgba(180,100,255,0.18)', text: '#c47aff' }
+    if (r.includes('illustration rare'))                        return { bg: 'rgba(120,100,255,0.18)', text: '#9d85ff' }
+    if (r.includes('ultra') || r.includes('secret'))           return { bg: 'rgba(255,170,0,0.18)',   text: '#ffc147' }
+    if (r.includes('full art') || r.includes('alt art'))       return { bg: 'rgba(255,150,50,0.18)',  text: '#ffaa55' }
+    if (r.includes('ace spec'))                                 return { bg: 'rgba(0,200,200,0.15)',   text: '#00e0d0' }
+    if (r.includes('rare holo') || r.includes('shiny'))        return { bg: 'rgba(212,175,55,0.18)',  text: COLORS.gold }
+    if (r.includes('rare'))                                     return { bg: 'rgba(212,175,55,0.12)',  text: '#c8a83a' }
+    if (r.includes('uncommon'))                                 return { bg: 'rgba(74,144,226,0.15)',  text: '#74b0ff' }
+    return { bg: 'rgba(255,255,255,0.06)', text: COLORS.muted }
+  }
+
+  const rc = rarityColor(card.rarity)
+
+  const currencyCode = currency === 'DKK' ? 'DKK' : currency === 'USD' ? 'USD' : 'EUR'
+
+  function fmtPrice(val) {
+    if (!val && val !== 0) return null
+    return new Intl.NumberFormat('da-DK', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(val)
+  }
+
+  const priceFormatted = fmtPrice(displayValue)
+  const changeFormatted = fmtPrice(absChange)
+
   return (
     <div className="fadeIn" style={{ position: 'relative' }}>
-      <div style={{ background: COLORS.card, borderRadius: 14, overflow: 'hidden', border: `1px solid ${COLORS.border}`, display: 'flex', flexDirection: 'column' }}>
+      <div style={{
+        background: '#111',
+        borderRadius: 16,
+        overflow: 'hidden',
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100%',
+      }}>
 
         {/* Card image */}
-        <div style={{ position: 'relative', aspectRatio: '3/4', background: COLORS.bg, overflow: 'hidden' }}>
-          {card.image_url ? (
-            <img src={card.image_url} alt={card.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-          ) : (
-            <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 8 }}>
-              <span style={{ fontSize: 36 }}>{game?.emoji || '🃏'}</span>
-              <span style={{ fontSize: 10, color: COLORS.muted, fontWeight: 600, textTransform: 'uppercase' }}>{game?.label || 'Card'}</span>
-            </div>
-          )}
+        <div style={{ position: 'relative', padding: '12px 12px 8px' }}>
+          <div style={{ borderRadius: 10, overflow: 'hidden', aspectRatio: '3/4', background: COLORS.bg }}>
+            {card.image_url ? (
+              <img src={card.image_url} alt={card.name}
+                style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+            ) : (
+              <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 8 }}>
+                <span style={{ fontSize: 32 }}>{game?.emoji || '🃏'}</span>
+              </div>
+            )}
+          </div>
 
-          {/* Options button */}
-          <button
-            onClick={() => setShowDelete(v => !v)}
-            style={{ position: 'absolute', top: 8, left: 8, width: 26, height: 26, borderRadius: 7, background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, border: 'none', cursor: 'pointer', color: '#fff', letterSpacing: 1 }}
-            aria-label="Card options"
-          >
+          <button onClick={() => setShowDelete(v => !v)}
+            style={{ position: 'absolute', top: 18, right: 18, width: 28, height: 28, borderRadius: 8, background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(6px)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, border: 'none', cursor: 'pointer', color: '#fff', letterSpacing: 2, zIndex: 2 }}>
             ···
           </button>
 
           {showDelete && (
-            <div className="fadeIn" style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.78)', backdropFilter: 'blur(4px)', display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'center', justifyContent: 'center' }}>
-              <button onClick={deleteCard} style={{ background: COLORS.danger, color: '#fff', borderRadius: 10, padding: '10px 22px', fontWeight: 700, fontSize: 13, border: 'none', cursor: 'pointer' }}>Delete</button>
+            <div className="fadeIn" style={{ position: 'absolute', inset: 12, borderRadius: 10, background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(4px)', display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'center', justifyContent: 'center', zIndex: 3 }}>
+              <button onClick={deleteCard} style={{ background: COLORS.danger, color: '#fff', borderRadius: 10, padding: '10px 28px', fontWeight: 700, fontSize: 14, border: 'none', cursor: 'pointer' }}>Delete</button>
               <button onClick={() => setShowDelete(false)} style={{ color: COLORS.muted, fontSize: 13, background: 'none', border: 'none', cursor: 'pointer' }}>Cancel</button>
             </div>
           )}
         </div>
 
-        {/* Info section */}
-        <div style={{ padding: '10px 10px 11px', display: 'flex', flexDirection: 'column', gap: 3 }}>
+        {/* Info section — flex-grow so price always sits at bottom */}
+        <div style={{ padding: '4px 14px 14px', display: 'flex', flexDirection: 'column', flexGrow: 1 }}>
 
-          {/* Card name — large + bold */}
-          <div style={{ fontWeight: 800, fontSize: 13, lineHeight: 1.25, letterSpacing: -0.2, color: COLORS.text, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
+          {/* Name */}
+          <div style={{ fontWeight: 800, fontSize: 17, lineHeight: 1.25, color: '#fff', marginBottom: 3, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
             {card.name || 'Unknown Card'}
           </div>
 
-          {/* Set name or game label */}
-          <div style={{ fontSize: 10, color: COLORS.muted, fontWeight: 500, letterSpacing: 0.1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {card.set_name || game?.label || 'Trading Card'}
+          {/* Set name */}
+          <div style={{ fontSize: 14, color: COLORS.muted, fontWeight: 400, marginBottom: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {card.set_name || game?.label || ''}
           </div>
 
-          {/* Finish + card number */}
-          <div style={{ fontSize: 10, color: COLORS.muted, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {[card.finish, card.card_number].filter(Boolean).join(' • ') || '—'}
-          </div>
-
-          {/* Condition */}
-          <div style={{ fontSize: 10, fontWeight: 700, color: conditionColor, letterSpacing: 0.1 }}>
-            {conditionLabel || 'Near Mint'}
-          </div>
-
-          {/* Divider */}
-          <div style={{ height: 1, background: 'rgba(255,255,255,0.055)', margin: '3px 0' }} />
-
-          {/* Value + Qty */}
-          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 4 }}>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 2, minWidth: 0, flex: 1 }}>
-              <span style={{ fontSize: 10, color: changeColor, fontWeight: 800, lineHeight: 1, flexShrink: 0 }}>
-                {dailyChange >= 0 ? '▲' : '▼'}
-              </span>
-              <span style={{ fontWeight: 700, fontSize: 13, color: COLORS.text, fontFamily: FONT_VALUE, letterSpacing: -0.3, fontVariantNumeric: 'tabular-nums', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {displayValue ? fmtAbs(displayValue) : '—'}
-              </span>
+          {/* Rarity • Card number — plain text, rarity gets its color */}
+          {(card.rarity || card.card_number) && (
+            <div style={{ fontSize: 13, color: COLORS.muted, fontWeight: 400, marginBottom: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {card.rarity && <span style={{ color: rc.text }}>{card.rarity}</span>}
+              {card.rarity && card.card_number && <span style={{ color: COLORS.muted }}> • </span>}
+              {card.card_number && <span>{card.card_number}</span>}
             </div>
-            <span style={{ fontSize: 10, color: COLORS.muted, fontWeight: 600, flexShrink: 0 }}>Qty: 1</span>
+          )}
+
+          {/* Condition • Finish — teal */}
+          {conditionLine && (
+            <div style={{ fontSize: 14, color: COLORS.success, fontWeight: 400, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {conditionLine}
+            </div>
+          )}
+
+          {/* Spacer */}
+          <div style={{ flexGrow: 1, minHeight: 12 }} />
+
+          {/* Price */}
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 5, marginBottom: 4 }}>
+            {hasTrend && (
+              <span style={{ fontSize: 12, color: trendColor, fontWeight: 700 }}>
+                {trendUp ? '▲' : '▼'}
+              </span>
+            )}
+            {priceFormatted ? (
+              <>
+                <span style={{ fontWeight: 800, fontSize: 22, color: COLORS.success, fontFamily: FONT_VALUE, letterSpacing: -0.5, fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>
+                  {currency === 'DKK' ? 'kr' : currency === 'USD' ? '$' : '€'}{priceFormatted}
+                </span>
+                <span style={{ fontSize: 12, color: COLORS.muted, fontWeight: 500 }}>{currencyCode}</span>
+              </>
+            ) : (
+              <span style={{ fontSize: 14, color: COLORS.muted }}>No price</span>
+            )}
           </div>
 
-          {/* Absolute change + % */}
-          <div style={{ fontSize: 10, fontWeight: 600, color: changeColor, fontFamily: FONT_VALUE, fontVariantNumeric: 'tabular-nums' }}>
-            {displayValue
-              ? `${dailyChange >= 0 ? '+' : '-'}${fmtAbs(absChange)} (${dailyChange >= 0 ? '+' : ''}${dailyChange.toFixed(2)}%)`
-              : <span style={{ color: COLORS.muted }}>No value set</span>
-            }
+          {/* Bottom row: Qty | change */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span style={{ fontSize: 13, color: COLORS.muted, fontWeight: 500 }}>Qty: 1</span>
+            {displayValue && hasTrend && changeFormatted && (
+              <span style={{ fontSize: 12, color: trendColor, fontFamily: FONT_VALUE, fontVariantNumeric: 'tabular-nums' }}>
+                {trendUp ? '+' : '-'}{currency === 'DKK' ? 'kr' : currency === 'USD' ? '$' : '€'}{changeFormatted} ({trendUp ? '+' : ''}{trendPct.toFixed(2)}%)
+              </span>
+            )}
           </div>
 
         </div>
@@ -2355,83 +2610,228 @@ const GAME_LOGOS = {
 }
 
 // SEARCH SCREEN
-function SearchScreen({ onSelectGame }) {
+function AddFromCatalogSheet({ card, session, onClose }) {
+  const game = GAMES.find(g => g.id === card.gameId)
+  const [finish, setFinish] = useState(card.finishTypes?.[0] || 'Normal')
+  const [grade, setGrade] = useState('')
+  const [purchasePrice, setPurchasePrice] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+  const [saveError, setSaveError] = useState('')
+
+  async function save() {
+    setSaving(true)
+    setSaveError('')
+    const { error } = await supabase.from('cards').insert({
+      user_id: session.user.id,
+      name: card.name,
+      game: card.gameId,
+      set_name: card.setName,
+      card_number: card.number,
+      finish,
+      grade: grade ? Number(grade) : null,
+      purchase_price: purchasePrice ? Number(purchasePrice) : null,
+      catalog_id: card.id,
+    })
+    setSaving(false)
+    if (error) { setSaveError(error.message); return }
+    setSaved(true)
+    setTimeout(onClose, 900)
+  }
+
+  return (
+    <div
+      style={{ position: 'fixed', inset: 0, zIndex: 999, background: 'rgba(0,0,0,0.72)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'flex-end' }}
+      onClick={e => e.target === e.currentTarget && onClose()}
+    >
+      <div className="fadeIn" style={{ background: COLORS.card, borderRadius: '20px 20px 0 0', border: `1px solid ${COLORS.border}`, borderBottom: 'none', padding: '20px 20px 44px', width: '100%', maxWidth: 480, margin: '0 auto' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 18 }}>
+          <div>
+            <div style={{ fontWeight: 800, fontSize: 16, color: COLORS.text }}>{card.name}</div>
+            <div style={{ fontSize: 12, color: COLORS.muted, marginTop: 2 }}>
+              {[card.number && `#${card.number}`, card.setName, game?.label].filter(Boolean).join(' · ')}
+            </div>
+          </div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', color: COLORS.muted, fontSize: 22, cursor: 'pointer', lineHeight: 1, padding: 0 }}>✕</button>
+        </div>
+
+        <div style={{ fontSize: 11, fontWeight: 700, color: COLORS.muted, letterSpacing: 0.5, marginBottom: 8 }}>FINISH</div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 18 }}>
+          {(card.finishTypes || ['Normal']).map(f => (
+            <button key={f} onClick={() => setFinish(f)} style={{ padding: '7px 16px', borderRadius: 50, border: `1.5px solid ${finish === f ? COLORS.gold : COLORS.border}`, background: finish === f ? `${COLORS.gold}18` : 'transparent', color: finish === f ? COLORS.gold : COLORS.muted, fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>{f}</button>
+          ))}
+        </div>
+
+        <div style={{ fontSize: 11, fontWeight: 700, color: COLORS.muted, letterSpacing: 0.5, marginBottom: 8 }}>GRADE (optional)</div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 18 }}>
+          {[10, 9, 8, 7, ''].map(g => (
+            <button key={String(g)} onClick={() => setGrade(String(g))} style={{ padding: '7px 14px', borderRadius: 50, border: `1.5px solid ${String(grade) === String(g) ? COLORS.gold : COLORS.border}`, background: String(grade) === String(g) ? `${COLORS.gold}18` : 'transparent', color: String(grade) === String(g) ? COLORS.gold : COLORS.muted, fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>
+              {g === '' ? 'Ungraded' : `PSA ${g}`}
+            </button>
+          ))}
+        </div>
+
+        <div style={{ fontSize: 11, fontWeight: 700, color: COLORS.muted, letterSpacing: 0.5, marginBottom: 8 }}>PURCHASE PRICE (optional)</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#111', borderRadius: 10, border: `1px solid ${COLORS.border}`, padding: '0 14px', height: 44, marginBottom: 22 }}>
+          <span style={{ color: COLORS.muted, fontSize: 15 }}>€</span>
+          <input type="number" value={purchasePrice} onChange={e => setPurchasePrice(e.target.value)} placeholder="0.00" style={{ flex: 1, background: 'none', border: 'none', outline: 'none', color: COLORS.text, fontSize: 15, fontFamily: FONT_VALUE }} />
+        </div>
+
+        {saveError && <div style={{ color: COLORS.danger, fontSize: 12, marginBottom: 12 }}>{saveError}</div>}
+
+        <button
+          onClick={save}
+          disabled={saving || saved}
+          style={{ width: '100%', padding: 14, borderRadius: 14, background: saved ? COLORS.success : COLORS.gold, color: '#000', fontWeight: 800, fontSize: 15, border: 'none', cursor: saving || saved ? 'default' : 'pointer', opacity: saving ? 0.7 : 1, transition: 'background 0.25s' }}
+        >
+          {saved ? '✓ Added to Collection' : saving ? 'Saving…' : 'Add to Collection'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function SearchScreen({ onSelectGame, session }) {
   const [query, setQuery] = useState('')
+  const [results, setResults] = useState([])
+  const [loading, setLoading] = useState(false)
+  const [searched, setSearched] = useState(false)
+  const [selectedCard, setSelectedCard] = useState(null)
   const [imgErrors, setImgErrors] = useState({})
+  const debounceRef = useRef(null)
+  const CDN_URL = import.meta.env.VITE_R2_CDN_URL || ''
+
+  useEffect(() => {
+    if (!query.trim()) {
+      setResults([])
+      setSearched(false)
+      setLoading(false)
+      clearTimeout(debounceRef.current)
+      return
+    }
+    clearTimeout(debounceRef.current)
+    debounceRef.current = setTimeout(() => doSearch(query.trim()), 300)
+    return () => clearTimeout(debounceRef.current)
+  }, [query])
+
+  async function doSearch(q) {
+    setLoading(true)
+    setSearched(true)
+    try {
+      const params = new URLSearchParams({ q, limit: 24 })
+      const res = await fetch(`${API_URL}/api/v1/search?${params}`)
+      if (!res.ok) throw new Error('search failed')
+      const data = await res.json()
+      setResults(Array.isArray(data) ? data : [])
+    } catch {
+      setResults([])
+    }
+    setLoading(false)
+  }
+
+  const showQuickFilters = !query.trim()
 
   return (
     <div style={{ paddingBottom: 110, maxWidth: 480, margin: '0 auto' }}>
+
       {/* Search bar */}
       <div style={{ padding: '16px 16px 0' }}>
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: 10,
-          background: COLORS.card, borderRadius: 50,
-          border: `1px solid ${COLORS.border}`, padding: '0 16px', height: 48,
-        }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, background: COLORS.card, borderRadius: 50, border: `1px solid ${COLORS.border}`, padding: '0 16px', height: 48 }}>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={COLORS.muted} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
           <input
             value={query}
             onChange={e => setQuery(e.target.value)}
-            placeholder="Search for cards..."
+            placeholder="Search cards, sets, rarity…"
             style={{ flex: 1, background: 'none', border: 'none', outline: 'none', color: COLORS.text, fontSize: 15 }}
           />
-          {query ? (
+          {query && (
             <button onClick={() => setQuery('')} style={{ background: 'none', border: 'none', color: COLORS.muted, fontSize: 18, cursor: 'pointer', padding: 0, lineHeight: 1 }}>✕</button>
-          ) : (
-            <>
-              <div style={{ width: 1, height: 20, background: COLORS.border }} />
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={COLORS.muted} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={COLORS.muted} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="4" y1="6" x2="20" y2="6"/><line x1="8" y1="12" x2="16" y2="12"/><line x1="11" y1="18" x2="13" y2="18"/></svg>
-            </>
           )}
         </div>
       </div>
 
-      {/* Quick Filters */}
-      <div style={{ padding: '28px 16px 0' }}>
-        <div style={{ fontWeight: 800, fontSize: 18, marginBottom: 16 }}>Quick Filters</div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-          {GAMES.map(game => {
-            const logoUrl = GAME_LOGOS[game.id]
-            const hasLogo = logoUrl && !imgErrors[game.id]
+      {/* Quick Filters — only when no query */}
+      {showQuickFilters && (
+        <div style={{ padding: '28px 16px 0' }}>
+          <div style={{ fontWeight: 800, fontSize: 18, marginBottom: 16 }}>Quick Filters</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            {GAMES.map(game => (
+              <button key={game.id} onClick={() => onSelectGame(game.id)} style={{ background: `radial-gradient(ellipse at 30% 30%, ${game.color}25 0%, #111 65%)`, border: `1px solid ${game.color}40`, borderRadius: 16, height: 110, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: '14px 12px' }}>
+                {!imgErrors[game.id] ? (
+                  <img
+                    src={GAME_LOGOS[game.id]}
+                    alt={game.label}
+                    onError={() => setImgErrors(e => ({ ...e, [game.id]: true }))}
+                    style={{ height: 44, width: 'auto', maxWidth: 110, objectFit: 'contain' }}
+                  />
+                ) : (
+                  <span style={{ fontSize: 34, lineHeight: 1 }}>{game.emoji}</span>
+                )}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Loading */}
+      {!showQuickFilters && loading && (
+        <div style={{ display: 'flex', justifyContent: 'center', padding: '60px 0' }}>
+          <div style={{ width: 30, height: 30, borderRadius: '50%', border: `3px solid ${COLORS.border}`, borderTopColor: COLORS.gold, animation: 'spin 0.7s linear infinite' }} />
+        </div>
+      )}
+
+      {/* No results */}
+      {!showQuickFilters && !loading && searched && results.length === 0 && (
+        <div style={{ textAlign: 'center', padding: '60px 24px 0', color: COLORS.muted }}>
+          <div style={{ fontSize: 36, marginBottom: 12 }}>🔍</div>
+          <div style={{ fontWeight: 700, fontSize: 16, color: COLORS.text, marginBottom: 6 }}>No cards found</div>
+          <div style={{ fontSize: 13 }}>Try a different name, number, or set</div>
+        </div>
+      )}
+
+      {/* Results */}
+      {results.length > 0 && (
+        <div style={{ padding: '12px 16px 0', display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ fontSize: 11, color: COLORS.muted, fontWeight: 600, marginBottom: 2 }}>{results.length} result{results.length !== 1 ? 's' : ''}</div>
+          {results.map(card => {
+            const game = GAMES.find(g => g.id === card.gameId)
+            const thumbUrl = CDN_URL && card.thumbKey ? `${CDN_URL}/${card.thumbKey}` : null
             return (
-              <button
-                key={game.id}
-                onClick={() => onSelectGame(game.id)}
-                style={{
-                  background: `radial-gradient(ellipse at 30% 30%, ${game.color}25 0%, #111 65%)`,
-                  border: `1px solid ${game.color}40`,
-                  borderRadius: 16,
-                  height: 110,
-                  display: 'flex', flexDirection: 'column',
-                  alignItems: 'center', justifyContent: 'center',
-                  gap: 8, cursor: 'pointer',
-                  position: 'relative', overflow: 'hidden',
-                  padding: '14px 12px 10px',
-                }}
-              >
-                <div style={{ width: '100%', height: 56, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  {hasLogo ? (
-                    <img
-                      src={logoUrl}
-                      alt={game.label}
-                      referrerPolicy="no-referrer"
-                      onError={() => setImgErrors(e => ({ ...e, [game.id]: true }))}
-                      style={{
-                        maxWidth: game.id === 'dragonball' ? '96%' : '88%',
-                        maxHeight: game.id === 'dragonball' ? 62 : 54,
-                        width: 'auto', height: 'auto', objectFit: 'contain',
-                      }}
-                    />
+              <button key={card.id} onClick={() => setSelectedCard(card)} style={{ display: 'flex', alignItems: 'center', gap: 12, background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 12, padding: '10px 12px', cursor: 'pointer', textAlign: 'left', width: '100%' }}>
+                <div style={{ width: 44, height: 58, borderRadius: 6, overflow: 'hidden', background: '#111', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', border: `1px solid ${game?.color || COLORS.border}30` }}>
+                  {thumbUrl && !imgErrors[`r_${card.id}`] ? (
+                    <img src={thumbUrl} alt={card.name} onError={() => setImgErrors(e => ({ ...e, [`r_${card.id}`]: true }))} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                   ) : (
-                    <span style={{ fontSize: 34, lineHeight: 1 }}>{game.emoji}</span>
+                    <span style={{ fontSize: 20 }}>{game?.emoji || '🃏'}</span>
                   )}
                 </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 700, fontSize: 13, color: COLORS.text, marginBottom: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{card.name}</div>
+                  <div style={{ fontSize: 11, color: COLORS.muted, marginBottom: 5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {[card.number && `#${card.number}`, card.setName].filter(Boolean).join(' · ')}
+                  </div>
+                  <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+                    {card.rarity && (
+                      <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 50, background: `${game?.color || COLORS.gold}18`, color: game?.color || COLORS.gold, border: `1px solid ${game?.color || COLORS.gold}28` }}>{card.rarity}</span>
+                    )}
+                    {card.finishTypes?.filter(f => f !== 'Normal').map(f => (
+                      <span key={f} style={{ fontSize: 10, fontWeight: 600, padding: '2px 7px', borderRadius: 50, background: 'rgba(255,255,255,0.06)', color: COLORS.muted }}>{f}</span>
+                    ))}
+                    {card.hasPrice && (
+                      <span style={{ fontSize: 10, fontWeight: 600, padding: '2px 7px', borderRadius: 50, background: 'rgba(46,213,115,0.1)', color: COLORS.success }}>€ priced</span>
+                    )}
+                  </div>
+                </div>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={COLORS.border} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><polyline points="9,18 15,12 9,6"/></svg>
               </button>
             )
           })}
         </div>
-      </div>
+      )}
+
+      {selectedCard && (
+        <AddFromCatalogSheet card={selectedCard} session={session} onClose={() => setSelectedCard(null)} />
+      )}
     </div>
   )
 }
@@ -2461,10 +2861,11 @@ function BottomNav({ tab, setTab }) {
       )
     },
     {
-      id: 'scan', label: 'Ai Grade',
+      id: 'scan', label: 'Scan',
       icon: (a) => (
         <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke={ic(a)} strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round">
-          <path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 17l-6.2 4.3 2.4-7.4L2 9.4h7.6z"/>
+          <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+          <circle cx="12" cy="13" r="4"/>
         </svg>
       )
     },
@@ -2697,7 +3098,7 @@ export default function App() {
     <ErrorBoundary>
       <div style={{ background: COLORS.bg, minHeight: '100dvh' }}>
         {tab === 'home'       && <HomeScreen user={session.user} profile={profile} onGoScan={() => setTab('scan')} onViewAll={() => setTab('collection')} />}
-        {tab === 'search'     && <SearchScreen onSelectGame={gameId => { setSearchGameFilter(gameId); setTab('collection') }} />}
+        {tab === 'search'     && <SearchScreen onSelectGame={gameId => { setSearchGameFilter(gameId); setTab('collection') }} session={session} />}
         {tab === 'scan'       && <ScanScreen user={session.user} profile={profile} onScanDone={() => loadProfile(session.user.id)} modelState={modelState} modelProgress={modelProgress} />}
         {tab === 'collection' && <CollectionScreen user={session.user} initialGame={searchGameFilter} onClearFilter={() => setSearchGameFilter(null)} />}
         {tab === 'settings'   && <SettingsScreen user={session.user} profile={profile} onSignOut={() => setSession(null)} />}

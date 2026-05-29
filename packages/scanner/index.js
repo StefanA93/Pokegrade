@@ -24,33 +24,45 @@ export async function toWebp(imageBuffer, quality = 85) {
     .toBuffer()
 }
 
-export async function scanCard(imageBuffer, { game = null, searchFn, candidatePhashes = [] } = {}) {
+export async function scanCard(imageBuffer, { game = null, searchFn } = {}) {
   const normalized = await normalizeImage(imageBuffer)
+
+  // Kør OCR og phash parallelt — nummer-OCR undlades (upålidelig på moderne kort)
   const [ocrResult, uploadedPhash] = await Promise.all([
     extractCardName(normalized, game || 'pokemon'),
-    computePhash(normalized)
+    computePhash(normalized),
   ])
 
   const { text: ocrText, confidence: ocrConfidence } = ocrResult
+
+  // Phash-prioriteret sti: selv når OCR fejler kan phash identificere kortet
+  // Floor på 0.3 sikrer at phash-signalet stadig tæller selv ved dårlig OCR
+  const effectiveOcrWeight = Math.max(ocrConfidence, 0.3)
 
   if (!ocrText || ocrText.length < 2) {
     return { candidates: [], confidence: 0, ocrText: '', autoMatched: false }
   }
 
-  const rawCandidates = searchFn ? await searchFn(ocrText, { gameId: game, limit: 5 }) : []
+  const rawCandidates = searchFn
+    ? await searchFn(ocrText, { gameId: game, limit: 10 })
+    : []
 
+  // Rangér: phash er primær disambiguation-signal, søgescore er sekundær
   const ranked = rawCandidates.map(c => {
-    const pHashScore = c.phash ? phashSimilarity(uploadedPhash, c.phash) : 0.5
-    const combinedScore = ocrConfidence * (c._searchScore ?? 0.8) * (0.4 + pHashScore * 0.6)
+    const pHashScore    = c.phash ? phashSimilarity(uploadedPhash, c.phash) : 0.5
+    const searchScore   = c._searchScore ?? 0.7
+    // Phash vægtes tungere (60%) end før — specielt vigtigt for moderne kort
+    const combinedScore = effectiveOcrWeight * searchScore * (0.35 + pHashScore * 0.65)
     return { ...c, _pHashScore: pHashScore, _combinedScore: combinedScore }
   }).sort((a, b) => b._combinedScore - a._combinedScore)
 
-  const best = ranked[0]
+  const best       = ranked[0]
   const confidence = best?._combinedScore ?? 0
 
-  if (confidence > 0.75 && ranked.length > 0) {
+  // Tærskel sænket til 0.60 — phash giver tilstrækkeligt signal selv med svag OCR
+  if (confidence > 0.60 && ranked.length > 0) {
     return { match: best, candidates: ranked.slice(0, 3), confidence, ocrText, autoMatched: true }
   }
 
-  return { candidates: ranked.slice(0, 3), confidence, ocrText, autoMatched: false }
+  return { candidates: ranked.slice(0, 5), confidence, ocrText, autoMatched: false }
 }

@@ -1,4 +1,5 @@
 import { PokemonProvider }    from './pokemon.js'
+import { PokemonJPProvider }  from './pokemon-jp.js'
 import { MTGProvider }        from './mtg.js'
 import { YGOProvider }        from './yugioh.js'
 import { OnePieceProvider }   from './onepiece.js'
@@ -7,6 +8,7 @@ import { DragonBallProvider } from './dragonball.js'
 
 export { TCGProvider }        from './base.js'
 export { PokemonProvider }    from './pokemon.js'
+export { PokemonJPProvider }  from './pokemon-jp.js'
 export { MTGProvider }        from './mtg.js'
 export { YGOProvider }        from './yugioh.js'
 export { OnePieceProvider }   from './onepiece.js'
@@ -18,6 +20,7 @@ let _registry = null
 function buildRegistry() {
   return {
     pokemon:    new PokemonProvider({ apiKey: process.env.PTCG_API_KEY }),
+    pokemonjp:  new PokemonJPProvider({ apiKey: process.env.TCGAPI_KEY }),
     mtg:        new MTGProvider(),
     yugioh:     new YGOProvider(),
     onepiece:   new OnePieceProvider({ apiKey: process.env.CARDMARKET_API_KEY }),
@@ -34,5 +37,5 @@ export function getProvider(gameId) {
 }
 
 export function getAllGameIds() {
-  return ['pokemon', 'mtg', 'yugioh', 'onepiece', 'lorcana', 'dragonball']
+  return ['pokemon', 'pokemonjp', 'mtg', 'yugioh', 'onepiece', 'lorcana', 'dragonball']
 }
