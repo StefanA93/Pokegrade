@@ -1,22 +1,22 @@
 /**
- * Free Scan endpoint — Node.js runtime (ikke Edge, da vi bruger sharp + Tesseract).
+ * Free Scan — Node.js runtime.
+ * 3-signal pipeline (høj til lav præcision):
+ *   1. CLIP embedding  → pgvector cosine similarity (primær, semantisk robust)
+ *   2. phash           → Hamming distance (visuelt pre-filter + fallback)
+ *   3. Kortnummer OCR  → additive bonus når nummer matcher
  *
- * 3-signal pipeline:
- *   1. phash        → visual pre-filter: top 50 visuelle kandidater fra DB
- *   2. Kortnummer   → OCR på nummerzonen (NNN/TTT) — maskinlæsbar font, ~70% præcision på rigtige fotos
- *   3. Meilisearch  → tekst-search på navn/nummer hvis OCR giver noget
- *
- * Kombineret ranking giver markant bedre top-1 end phash alene.
+ * CLIP er robust overfor kamera-støj, vinkler og belysning.
+ * phash bruges som tiebreaker og fallback når embedding endnu ikke er backfillet.
  */
 
 import sharp     from 'sharp'
 import Tesseract from 'tesseract.js'
 import { MeiliSearch } from 'meilisearch'
 
-const SUPABASE_URL      = process.env.SUPABASE_URL
-const SUPABASE_KEY      = process.env.SUPABASE_SERVICE_KEY
-const MEILISEARCH_URL   = process.env.MEILISEARCH_URL  || 'http://localhost:7700'
-const MEILISEARCH_KEY   = process.env.MEILISEARCH_KEY  || ''
+const SUPABASE_URL = process.env.SUPABASE_URL
+const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY
+const MEILI_URL    = process.env.MEILISEARCH_URL || 'http://localhost:7700'
+const MEILI_KEY    = process.env.MEILISEARCH_KEY || ''
 
 const CORS = {
   'Access-Control-Allow-Origin':  '*',
@@ -26,252 +26,186 @@ const CORS = {
 
 const VALID_GAMES = ['pokemon', 'pokemonjp', 'mtg', 'yugioh', 'onepiece', 'lorcana', 'dragonball']
 
-// ─── Perceptuelt hash (dHash 8×8 = 64-bit) ────────────────────────────────
+// ─── phash (fallback) ──────────────────────────────────────────────────────
 async function computePhash(buf) {
   const SIZE = 8
-  const pixels = await sharp(buf)
-    .resize(SIZE + 1, SIZE, { fit: 'fill' })
-    .grayscale()
-    .raw()
-    .toBuffer()
-
+  const px = await sharp(buf).resize(SIZE + 1, SIZE, { fit: 'fill' }).grayscale().raw().toBuffer()
   let bits = ''
-  for (let row = 0; row < SIZE; row++) {
-    for (let col = 0; col < SIZE; col++) {
-      const i = row * (SIZE + 1) + col
-      bits += pixels[i] < pixels[i + 1] ? '1' : '0'
-    }
-  }
+  for (let r = 0; r < SIZE; r++)
+    for (let c = 0; c < SIZE; c++)
+      bits += px[r * (SIZE + 1) + c] < px[r * (SIZE + 1) + c + 1] ? '1' : '0'
   let hex = ''
   for (let i = 0; i < bits.length; i += 4) hex += parseInt(bits.slice(i, i + 4), 2).toString(16)
   return hex
 }
 
-function hammingDistance(a, b) {
+function hammingDist(a, b) {
   if (!a || !b || a.length !== b.length) return Infinity
-  let dist = 0
-  for (let i = 0; i < a.length; i++) {
-    let xor = parseInt(a[i], 16) ^ parseInt(b[i], 16)
-    while (xor) { dist += xor & 1; xor >>= 1 }
-  }
-  return dist
+  let d = 0
+  for (let i = 0; i < a.length; i++) { let x = parseInt(a[i], 16) ^ parseInt(b[i], 16); while (x) { d += x & 1; x >>= 1 } }
+  return d
+}
+
+function cosine(a, b) {
+  if (!a || !b || a.length !== b.length) return 0
+  let dot = 0, na = 0, nb = 0
+  for (let i = 0; i < a.length; i++) { dot += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i] }
+  return na && nb ? dot / (Math.sqrt(na) * Math.sqrt(nb)) : 0
 }
 
 // ─── Kortnummer OCR ────────────────────────────────────────────────────────
-let _worker = null
+let _ocrWorker = null
 
 async function getOcrWorker() {
-  if (_worker) return _worker
-  _worker = await Tesseract.createWorker('eng', 1, { logger: () => {} })
-  await _worker.setParameters({
+  if (_ocrWorker) return _ocrWorker
+  _ocrWorker = await Tesseract.createWorker('eng', 1, { logger: () => {} })
+  await _ocrWorker.setParameters({
     tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789/-',
-    tessedit_pageseg_mode:   '7',   // Enkelt linje
+    tessedit_pageseg_mode:   '7',
   })
-  return _worker
+  return _ocrWorker
 }
 
-function parseCardNumber(raw) {
-  if (!raw) return null
-  const clean = raw.replace(/\s+/g, '').toUpperCase()
-
-  // Format: NNN/TTT → returnér tæller-delen
-  const slash = clean.match(/^(\d{1,4})\/(\d{1,4})$/)
-  if (slash) return { num: slash[1].replace(/^0+(?=\d)/, '') || '0', total: slash[2] }
-
-  // Promotional: SWSH020, SVP114, OP01-001, LED5-EN020 etc.
-  const promo = clean.match(/^([A-Z]{2,5})\d{2,4}(?:-[A-Z]{0,2}\d{2,3})?$/)
-  if (promo) return { num: clean, total: null }
-
-  // Kun nummer
-  const only = clean.match(/^(\d{1,4})$/)
-  if (only) return { num: only[1].replace(/^0+(?=\d)/, '') || '0', total: null }
-
+async function ocrCardNumber(imgBuf) {
+  const { width, height } = await sharp(imgBuf).metadata()
+  const zone = { left: Math.floor(width * 0.08), top: Math.floor(height * 0.865), width: Math.floor(width * 0.84), height: Math.floor(height * 0.075) }
+  const crop = await sharp(imgBuf).extract(zone).resize({ width: 700 }).grayscale().normalize().sharpen({ sigma: 1.2 }).toBuffer()
+  const w = await getOcrWorker()
+  const { data } = await w.recognize(crop)
+  const raw = data.text.replace(/\s+/g, '').toUpperCase()
+  const slash = raw.match(/^(\d{1,4})\/(\d{1,4})$/)
+  if (slash) return slash[1].replace(/^0+(?=\d)/, '') || '0'
+  const num = raw.match(/^(\d{1,4})$/)
+  if (num) return num[1].replace(/^0+(?=\d)/, '') || '0'
   return null
 }
 
-async function extractCardNumber(imgBuf, game) {
-  const { width, height } = await sharp(imgBuf).metadata()
+// ─── Supabase ─────────────────────────────────────────────────────────────
+const sbh = () => ({ apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json' })
 
-  // Nummerzonen: Pokémon 86-94% af højden, MTG 86-94%, resten lignende
-  const top    = Math.floor(height * 0.865)
-  const zone   = { left: Math.floor(width * 0.08), top, width: Math.floor(width * 0.84), height: Math.floor(height * 0.075) }
-
-  const cropBuf = await sharp(imgBuf)
-    .extract(zone)
-    .resize({ width: 700 })
-    .grayscale()
-    .normalize()
-    .sharpen({ sigma: 1.2 })
-    .toBuffer()
-
-  const worker = await getOcrWorker()
-  const { data } = await worker.recognize(cropBuf)
-  return parseCardNumber(data.text.trim())
-}
-
-// ─── Supabase helpers ──────────────────────────────────────────────────────
-const sbHeaders = () => ({
-  apikey:        SUPABASE_KEY,
-  Authorization: `Bearer ${SUPABASE_KEY}`,
-})
-
-async function fetchAllPhashes(game) {
-  const all  = []
-  const PAGE = 1000
-  let offset = 0
-  while (true) {
-    const r = await fetch(
-      `${SUPABASE_URL}/rest/v1/card_catalog?game=eq.${game}&phash=not.is.null&select=id,phash&limit=${PAGE}&offset=${offset}`,
-      { headers: sbHeaders() }
-    )
-    if (!r.ok) break
-    const batch = await r.json()
-    all.push(...batch)
-    if (batch.length < PAGE) break
-    offset += PAGE
-  }
-  return all
-}
-
-async function fetchCardDetails(ids) {
-  if (!ids.length) return []
-  const r = await fetch(
-    `${SUPABASE_URL}/rest/v1/card_catalog?id=in.(${ids.map(id => `"${id}"`).join(',')})&select=id,name,number,set_id,set_name,rarity,finish_types,image_url,game`,
-    { headers: sbHeaders() }
-  )
-  if (!r.ok) return []
+async function clipSearch(embedding, game, count = 20) {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/match_cards`, {
+    method:  'POST',
+    headers: sbh(),
+    body:    JSON.stringify({ query_embedding: `[${embedding.join(',')}]`, game_filter: game, match_count: count }),
+  })
+  if (!r.ok) return null   // pgvector endnu ikke sat op → faldt tilbage til phash
   return r.json()
 }
 
-async function fetchByNumber(game, num, total) {
-  if (!num) return []
-  let params = `game=eq.${game}&number=eq.${encodeURIComponent(num)}&select=id,name,number,set_id,set_name,rarity,finish_types,image_url,game&limit=20`
-  const r = await fetch(`${SUPABASE_URL}/rest/v1/card_catalog?${params}`, { headers: sbHeaders() })
-  if (!r.ok) return []
-  const rows = await r.json()
-  // Hvis vi har total (NNN/TTT), filtrer på sæt med samme antal kort
-  return rows
+async function phashSearch(game, uploadedHash) {
+  const all = []
+  let offset = 0
+  while (true) {
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/card_catalog?game=eq.${game}&phash=not.is.null&select=id,phash&limit=1000&offset=${offset}`, { headers: sbh() })
+    if (!r.ok) break
+    const batch = await r.json()
+    all.push(...batch)
+    if (batch.length < 1000) break
+    offset += 1000
+  }
+  return all
+    .map(c => ({ id: c.id, dist: hammingDist(uploadedHash, c.phash) }))
+    .sort((a, b) => a.dist - b.dist)
+    .slice(0, 50)
 }
 
-// ─── Meilisearch søgning ───────────────────────────────────────────────────
-let _meili = null
-function getMeili() {
-  if (!_meili) _meili = new MeiliSearch({ host: MEILISEARCH_URL, apiKey: MEILISEARCH_KEY })
-  return _meili
+async function fetchDetails(ids) {
+  if (!ids.length) return []
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/card_catalog?id=in.(${ids.map(id => `"${id}"`).join(',')})&select=id,name,number,set_id,set_name,rarity,finish_types,image_url,game`, { headers: sbh() })
+  return r.ok ? r.json() : []
 }
 
-async function meiliSearch(query, game, limit = 10) {
-  try {
-    const res = await getMeili().index('cards').search(query, {
-      limit,
-      filter: game ? [`gameId = ${game}`] : [],
-      attributesToRetrieve: ['id', 'name', 'number', 'setName', 'rarity', 'finishTypes', 'thumbKey', 'phash'],
-      showRankingScore: true,
-    })
-    return res.hits.map(h => ({ ...h, _searchScore: h._rankingScore ?? 0.5 }))
-  } catch { return [] }
-}
-
-// ─── Kombineret ranking ────────────────────────────────────────────────────
-// Princip: phash er primær. OCR + Meilisearch er KUN additive bonusser.
-// En kandidat kan aldrig falde pga. OCR — kun stige hvis nummer matcher.
-function rankCandidates({ phashCandidates, numberCandidates, meiliCandidates }) {
-  const numberIds = new Set(numberCandidates.map(c => c.id))
-  const meiliMap  = new Map(meiliCandidates.map(c => [c.id, c._searchScore ?? 0.5]))
-
-  return phashCandidates.map(c => {
-    const phashSim    = Math.max(0, 1 - c.dist / 64)
-    const numberBonus = numberIds.has(c.id) ? 0.50 : 0          // stærk bekræftelse
-    const meiliBonus  = (meiliMap.get(c.id) ?? 0) * 0.10        // svag tekst-boost
-    const total       = phashSim + numberBonus + meiliBonus
-
-    return {
-      id:      c.id,
-      dist:    c.dist,
-      total,
-      sources: {
-        phash:  phashSim,
-        number: numberBonus,
-        meili:  meiliBonus,
-      },
-    }
-  }).sort((a, b) => b.total - a.total)
+async function fetchByNumber(game, num) {
+  if (!num) return new Set()
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/card_catalog?game=eq.${game}&number=eq.${encodeURIComponent(num)}&select=id&limit=30`, { headers: sbh() })
+  const rows = r.ok ? await r.json() : []
+  return new Set(rows.map(c => c.id))
 }
 
 // ─── Handler ───────────────────────────────────────────────────────────────
 export default async function handler(req, res) {
-  if (req.method === 'OPTIONS') {
-    Object.entries(CORS).forEach(([k, v]) => res.setHeader(k, v))
-    return res.status(200).end()
-  }
-
+  if (req.method === 'OPTIONS') { Object.entries(CORS).forEach(([k, v]) => res.setHeader(k, v)); return res.status(200).end() }
   Object.entries(CORS).forEach(([k, v]) => res.setHeader(k, v))
   res.setHeader('Content-Type', 'application/json')
-
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
 
   let body
-  try { body = await new Promise((resolve, reject) => {
-    let data = ''
-    req.on('data', chunk => data += chunk)
-    req.on('end', () => resolve(JSON.parse(data)))
-    req.on('error', reject)
-  }) } catch { return res.status(400).json({ error: 'Invalid JSON' }) }
+  try {
+    body = await new Promise((resolve, reject) => {
+      let d = ''; req.on('data', c => d += c); req.on('end', () => resolve(JSON.parse(d))); req.on('error', reject)
+    })
+  } catch { return res.status(400).json({ error: 'Invalid JSON' }) }
 
-  const { image, game, clientPhash } = body
-
-  if (!image || typeof image !== 'string') return res.status(400).json({ error: 'image required (base64 dataURL)' })
+  const { image, game, embedding: clientEmbedding } = body
+  if (!image) return res.status(400).json({ error: 'image required (base64 dataURL)' })
 
   const safeGame = VALID_GAMES.includes(game) ? game : 'pokemon'
+  const base64   = image.replace(/^data:image\/\w+;base64,/, '')
+  const imgBuf   = Buffer.from(base64, 'base64')
 
-  // Afkod base64 billede
-  const base64 = image.replace(/^data:image\/\w+;base64,/, '')
-  const imgBuf = Buffer.from(base64, 'base64')
+  const normalizedBuf = await sharp(imgBuf).resize(900, null, { withoutEnlargement: true }).jpeg({ quality: 90 }).toBuffer()
 
-  // Resize til max 900px bredde for konsistent hashing
-  const normalizedBuf = await sharp(imgBuf)
-    .resize(900, null, { withoutEnlargement: true })
-    .jpeg({ quality: 90 })
-    .toBuffer()
+  // ── Signal 1: CLIP (primær) ────────────────────────────────────────────
+  let clipResults   = null
+  let usedClip      = false
 
-  // ── Signal 1: phash ──────────────────────────────────────────────────────
-  const [uploadedPhash, allPhashes] = await Promise.all([
-    computePhash(normalizedBuf),
-    fetchAllPhashes(safeGame),
-  ])
-
-  const phashRanked = allPhashes
-    .map(c => ({ id: c.id, dist: hammingDistance(uploadedPhash, c.phash) }))
-    .sort((a, b) => a.dist - b.dist)
-    .slice(0, 50)   // Top 50 visuelle kandidater
-
-  // ── Signal 2: Kortnummer OCR ─────────────────────────────────────────────
-  let numberResult = null
-  let numberCandidates = []
-  try {
-    numberResult = await extractCardNumber(normalizedBuf, safeGame)
-    if (numberResult?.num) {
-      numberCandidates = await fetchByNumber(safeGame, numberResult.num, numberResult.total)
-    }
-  } catch { /* OCR fejlede — fortsæt uden */ }
-
-  // ── Signal 3: Meilisearch (nummer-søgning hvis vi har det) ───────────────
-  let meiliCandidates = []
-  if (numberResult?.num) {
-    meiliCandidates = await meiliSearch(numberResult.num, safeGame, 10)
+  if (clientEmbedding && Array.isArray(clientEmbedding) && clientEmbedding.length === 512) {
+    clipResults = await clipSearch(clientEmbedding, safeGame, 20)
+    if (clipResults && clipResults.length > 0) usedClip = true
   }
 
-  // ── Kombiner og rank ──────────────────────────────────────────────────────
-  const ranked = rankCandidates({ phashCandidates: phashRanked, numberCandidates, meiliCandidates, uploadedPhash })
-  const top5ids = ranked.slice(0, 5).map(r => r.id)
+  // ── Signal 2: phash (fallback / tiebreaker) ────────────────────────────
+  const [uploadedPhash, phashResults] = await Promise.all([
+    computePhash(normalizedBuf),
+    usedClip ? Promise.resolve([]) : phashSearch(safeGame, await computePhash(normalizedBuf)),
+  ])
 
-  // Hent fuld kortdata for top 5
-  const details  = await fetchCardDetails(top5ids)
+  // Byg kandidat-pool
+  let candidatePool
+  if (usedClip) {
+    // CLIP-resultater som primær pool — tilføj phash-similarity som bonus
+    candidatePool = clipResults.map(c => ({
+      id:         c.id,
+      clipSim:    typeof c.similarity === 'number' ? c.similarity : 0,
+      phashDist:  null,   // hentes ikke fra DB i CLIP-mode (for hurtigt)
+    }))
+  } else {
+    // Kun phash tilgængeligt (CLIP-embeddings endnu ikke backfillet)
+    candidatePool = phashResults.map(c => ({
+      id:         c.id,
+      clipSim:    0,
+      phashDist:  c.dist,
+    }))
+  }
+
+  // ── Signal 3: kortnummer OCR (additive bonus) ─────────────────────────
+  let ocrNum   = null
+  let numberIds = new Set()
+  try {
+    ocrNum = await ocrCardNumber(normalizedBuf)
+    if (ocrNum) numberIds = await fetchByNumber(safeGame, ocrNum)
+  } catch { /* ignore */ }
+
+  // ── Kombineret ranking ─────────────────────────────────────────────────
+  const scored = candidatePool.map(c => {
+    const clip   = c.clipSim                                         // 0–1  (primær)
+    const ph     = c.phashDist !== null ? 1 - c.phashDist / 64 : 0  // 0–1  (sekundær)
+    const number = numberIds.has(c.id) ? 0.40 : 0                   // bonus: nummer-match
+
+    const total = usedClip
+      ? clip * 0.75 + ph * 0.15 + number
+      : ph   * 0.75             + number
+
+    return { id: c.id, total, clipSim: clip, phashSim: ph }
+  }).sort((a, b) => b.total - a.total).slice(0, 5)
+
+  // Hent fuld kortdata
+  const details  = await fetchDetails(scored.map(c => c.id))
   const detMap   = Object.fromEntries(details.map(c => [c.id, c]))
 
-  const candidates = ranked.slice(0, 5).map(r => {
-    const card = detMap[r.id] || { id: r.id }
-    const phashEntry = phashRanked.find(p => p.id === r.id)
+  const candidates = scored.map(s => {
+    const card = detMap[s.id] || { id: s.id }
     return {
       id:           card.id,
       name:         card.name         || null,
@@ -282,28 +216,22 @@ export default async function handler(req, res) {
       finish_types: card.finish_types || ['Normal'],
       image_url:    card.image_url    || null,
       game:         card.game         || safeGame,
-      similarity:   phashEntry ? parseFloat((1 - phashEntry.dist / 64).toFixed(4)) : 0,
-      score:        parseFloat(r.total.toFixed(4)),
-      signals:      r.sources,
+      similarity:   parseFloat(s.total.toFixed(4)),
+      _clip:        parseFloat(s.clipSim.toFixed(4)),
     }
   })
 
-  // Confidence: høj hvis nummer-match bekræfter phash top-1
-  const top = candidates[0]
-  const numberConfirmed = top?.signals?.number > 0
-  const highPhash       = top?.similarity >= 0.85
-
-  const confidence = numberConfirmed ? 'high'
-    : highPhash                      ? 'high'
-    : top?.score >= 0.35             ? 'medium'
+  const top       = candidates[0]
+  const confidence = top?.similarity >= 0.90 ? 'high'
+    : top?.similarity >= 0.75                ? 'medium'
     : 'low'
 
   return res.status(200).json({
     candidates,
     confidence,
-    best:       confidence !== 'low' ? candidates[0] : null,
-    ocr:        numberResult ? { number: numberResult.num, total: numberResult.total } : null,
-    phash:      uploadedPhash,
-    meta:       { game: safeGame, pool: allPhashes.length, signals: { phash: phashRanked.length, number: numberCandidates.length, meili: meiliCandidates.length } },
+    best:    confidence !== 'low' ? candidates[0] : null,
+    ocr:     ocrNum ? { number: ocrNum } : null,
+    method:  usedClip ? 'clip+phash+ocr' : 'phash+ocr',
+    meta:    { game: safeGame, clip: usedClip, pool: candidatePool.length },
   })
 }

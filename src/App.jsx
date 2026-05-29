@@ -753,10 +753,19 @@ function ScanScreen({ user, profile, onScanDone, modelState, modelProgress }) {
         img.src = frontImg
       })
 
+      // Beregn CLIP embedding client-side hvis model er indlæst
+      let embedding = null
+      try {
+        const { isModelLoaded, extractEmbeddingFromDataUrl } = await import('./recognition/EmbeddingExtractor.js')
+        if (isModelLoaded()) {
+          embedding = await extractEmbeddingFromDataUrl(resizedImage)
+        }
+      } catch { /* CLIP ikke tilgængeligt — phash alene */ }
+
       const res = await fetch('/api/scan-free', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: resizedImage, game }),
+        body: JSON.stringify({ image: resizedImage, game, embedding }),
       })
 
       if (!res.ok) {
