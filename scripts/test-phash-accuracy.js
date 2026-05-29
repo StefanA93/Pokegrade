@@ -1,12 +1,14 @@
 /**
- * Test phash-baseret kortidentifikation (free scan pipeline).
- * Downloader officielle kortbilleder → beregner phash → finder nærmeste i DB.
+ * Test 3-signal free scan pipeline (phash + kortnummer OCR + Meilisearch).
+ * Downloader officielle kortbilleder → kører fuld pipeline → måler præcision.
  *
  * Kør: node scripts/test-phash-accuracy.js
  */
 import 'dotenv/config'
 import { computePhash, hammingDistance } from '../packages/scanner/phash.js'
+import { extractCardNumber } from '../packages/scanner/ocr.js'
 import { dbSelect } from '../server/middleware/db.js'
+import { searchCards } from '../packages/search/index.js'
 
 const TIMEOUT_MS  = 15000
 const CONCURRENCY = 4
@@ -102,29 +104,64 @@ async function run() {
       if (!dbCard?.phash)     return { catalogId, name, set, skip: 'ingen phash i DB' }
 
       try {
-        // Download officielt kortbillede og beregn phash
+        // Download officielt kortbillede
         const buf      = await downloadImage(dbCard.image_url)
         const computed = await computePhash(buf)
 
-        // Find nærmeste matches via Hamming distance
-        const scored = allPhashes
+        // Signal 1: phash → top 50
+        const phashTop50 = allPhashes
           .map(c => ({ id: c.id, dist: hammingDistance(computed, c.phash) }))
           .sort((a, b) => a.dist - b.dist)
+          .slice(0, 50)
+
+        // Signal 2: kortnummer OCR
+        let ocrNumber = null
+        let numberIds = new Set()
+        try {
+          const numResult = await extractCardNumber(buf, 'pokemon')
+          if (numResult) {
+            ocrNumber = numResult
+            // Find kandidater med samme nummer i top-50
+            const dbNum = await dbSelect('card_catalog', `game=eq.pokemon&number=eq.${encodeURIComponent(numResult)}&select=id&limit=20`)
+            dbNum.forEach(r => numberIds.add(r.id))
+          }
+        } catch { /* ignore */ }
+
+        // Signal 3: Meilisearch nummer-søgning
+        let meiliIds = new Set()
+        if (ocrNumber) {
+          const hits = await searchCards(ocrNumber, { gameId: 'pokemon', limit: 10 }).catch(() => [])
+          hits.forEach(h => meiliIds.add(h.id))
+        }
+
+        // Kombiner scores
+        const scores = new Map()
+        phashTop50.forEach(c => {
+          const sim = 1 - c.dist / 64
+          scores.set(c.id, (scores.get(c.id) || 0) + sim * 0.40)
+        })
+        numberIds.forEach(id => scores.set(id, (scores.get(id) || 0) + 0.45))
+        meiliIds.forEach(id  => scores.set(id, (scores.get(id) || 0) + 0.15))
+
+        const ranked = [...scores.entries()]
+          .sort((a, b) => b[1] - a[1])
           .slice(0, 5)
 
-        const rank      = scored.findIndex(c => c.id === catalogId) + 1
-        const bestMatch = scored[0]
-        const similarity = (1 - bestMatch.dist / 64)
+        const rank = ranked.findIndex(([id]) => id === catalogId) + 1
+        const bestPhash = phashTop50[0]
+        const similarity = bestPhash ? 1 - bestPhash.dist / 64 : 0
 
         return {
           catalogId, name, set,
           rank,
-          dist:       bestMatch.dist,
+          dist:       bestPhash?.dist ?? 64,
           similarity: similarity.toFixed(3),
           inTop1:     rank === 1,
           inTop3:     rank >= 1 && rank <= 3,
           inTop5:     rank >= 1 && rank <= 5,
           hasPhash:   true,
+          ocrNumber,
+          numberHit:  numberIds.has(catalogId),
         }
       } catch (e) {
         return { catalogId, name, set, skip: e.message.slice(0, 40) }
@@ -147,15 +184,15 @@ async function run() {
       const rankStr  = r.rank === 0 ? '✗    ' : r.rank === 1 ? '✅   ' : `#${r.rank}   `
       const top3Str  = r.inTop3 ? '✓    ' : '✗    '
       const top5Str  = r.inTop5 ? '✓    ' : '✗    '
+      const ocrStr   = r.ocrNumber ? (r.numberHit ? `✅ ${r.ocrNumber}` : `🔢 ${r.ocrNumber}`) : '—'
 
       console.log(
         pad(r.name, 22),
-        pad(r.set, 20),
-        pad('✓', 9),
+        pad(r.set, 18),
         pad(rankStr, 6),
         pad(top3Str, 6),
         pad(top5Str, 6),
-        `${String(r.dist).padStart(2)}    ${r.similarity}`
+        `${String(r.dist).padStart(2)}  ${r.similarity}  ${ocrStr}`
       )
     }
     await sleep(200)

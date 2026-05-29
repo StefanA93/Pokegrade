@@ -738,14 +738,25 @@ function ScanScreen({ user, profile, onScanDone, modelState, modelProgress }) {
     if (isFreeLimitReached) return
     setLoading(true); setError('')
     try {
-      // Beregn phash client-side — ingen server-roundtrip for selve hashen
-      const { computePhash } = await import('./recognition/phash.js')
-      const phash = await computePhash(frontImg)
+      // Resize billede client-side til max 900px (holder request under 500KB)
+      const resizedImage = await new Promise((resolve) => {
+        const img = new Image()
+        img.onload = () => {
+          const MAX = 900
+          const scale = img.width > MAX ? MAX / img.width : 1
+          const canvas = document.createElement('canvas')
+          canvas.width  = Math.round(img.width  * scale)
+          canvas.height = Math.round(img.height * scale)
+          canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height)
+          resolve(canvas.toDataURL('image/jpeg', 0.88))
+        }
+        img.src = frontImg
+      })
 
-      const res = await fetch('/api/phash-match', {
+      const res = await fetch('/api/scan-free', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phash, game }),
+        body: JSON.stringify({ image: resizedImage, game }),
       })
 
       if (!res.ok) {
@@ -755,11 +766,11 @@ function ScanScreen({ user, profile, onScanDone, modelState, modelProgress }) {
 
       const data = await res.json()
 
-      // Normalisér kandidater: finish_types (DB snake_case) → finishTypes (UI camelCase)
+      // Normalisér kandidater: finish_types → finishTypes
       const mapCard = c => ({ ...c, finishTypes: c.finish_types || ['Normal'] })
       const candidates  = (data.candidates || []).map(mapCard)
       const autoMatched = data.confidence === 'high'
-      const confidence  = candidates[0]?.similarity ?? 0
+      const confidence  = candidates[0]?.score ?? candidates[0]?.similarity ?? 0
 
       setResult({
         type: 'free',
@@ -767,7 +778,7 @@ function ScanScreen({ user, profile, onScanDone, modelState, modelProgress }) {
         match:      autoMatched ? candidates[0] : null,
         candidates,
         confidence,
-        ocrText:    null,
+        ocrText:    data.ocr?.number ? `#${data.ocr.number}${data.ocr.total ? `/${data.ocr.total}` : ''}` : null,
       })
 
       const today = new Date().toISOString().slice(0, 10)
