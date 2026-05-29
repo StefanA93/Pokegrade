@@ -1,17 +1,17 @@
 /**
- * Test 3-signal free scan pipeline (phash + kortnummer OCR + Meilisearch).
- * Downloader officielle kortbilleder → kører fuld pipeline → måler præcision.
+ * Test free scan pipeline: phash + kortnummer OCR + Meilisearch.
+ * Downloader officielle kortbilleder → kører alle 3 signaler → måler præcision.
  *
  * Kør: node scripts/test-phash-accuracy.js
  */
 import 'dotenv/config'
 import { computePhash, hammingDistance } from '../packages/scanner/phash.js'
-import { extractCardNumber } from '../packages/scanner/ocr.js'
-import { dbSelect } from '../server/middleware/db.js'
-import { searchCards } from '../packages/search/index.js'
+import { extractCardNumber }             from '../packages/scanner/ocr.js'
+import { dbSelect }                      from '../server/middleware/db.js'
+import { searchCards }                   from '../packages/search/index.js'
 
 const TIMEOUT_MS  = 15000
-const CONCURRENCY = 4
+const CONCURRENCY = 3
 
 const TEST_CARDS = [
   ['pokemon-sv4pt5-54',     'Charizard ex',      'Paldean Fates'],
@@ -31,9 +31,8 @@ const TEST_CARDS = [
   ['pokemon-sv5-180',       'Ogerpon ex',         'Twilight Masquerade'],
   ['pokemon-sv1-186',       'Arven',              'Scarlet & Violet'],
   ['pokemon-sv3-198',       'Tyranitar ex',       'Obsidian Flames'],
-  ['pokemon-swsh12-186',    'Charizard VSTAR',    'Brilliant Stars'],
   ['pokemon-base1-6',       'Gyarados',           'Base Set'],
-  ['pokemon-sv4pt5-234',    'Charizard ex',       'Paldean Fates (SIR)'],
+  ['pokemon-sv4pt5-234',    'Charizard ex SIR',   'Paldean Fates'],
 ]
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
@@ -47,167 +46,161 @@ async function downloadImage(url) {
     const r = await fetch(url, { signal: ctrl.signal })
     if (!r.ok) throw new Error(`HTTP ${r.status}`)
     return Buffer.from(await r.arrayBuffer())
-  } finally {
-    clearTimeout(t)
-  }
+  } finally { clearTimeout(t) }
 }
 
 async function run() {
-  console.log('GradeDex — Phash Free Scan Test')
-  console.log(`Testkorpus: ${TEST_CARDS.length} Pokémon-kort\n`)
+  console.log('GradeDex — Free Scan Pipeline Test (phash + OCR + Meilisearch)\n')
 
-  // Hent alle image_url fra DB for testkorpuset
+  // Hent kortdata fra DB
   const ids    = [...new Set(TEST_CARDS.map(t => t[0]))]
-  const dbRows = await dbSelect(
-    'card_catalog',
-    `id=in.(${ids.map(id => `"${id}"`).join(',')})&select=id,name,image_url,phash`
-  )
+  const dbRows = await dbSelect('card_catalog',
+    `id=in.(${ids.map(id => `"${id}"`).join(',')})&select=id,name,number,image_url,phash`)
   const dbMap = Object.fromEntries(dbRows.map(c => [c.id, c]))
 
-  // Hent alle Pokémon phashes fra DB med pagination (Supabase max 1000/kald)
-  console.log('Henter alle Pokémon phashes fra database...')
+  // Hent alle Pokémon phashes (pagineret)
+  console.log('Henter phashes fra DB...')
   const allPhashes = []
-  const PAGE = 1000
-  let offset  = 0
+  let offset = 0
   while (true) {
-    const batch = await dbSelect(
-      'card_catalog',
-      `game=eq.pokemon&phash=not.is.null&select=id,phash&limit=${PAGE}&offset=${offset}`
-    )
+    const batch = await dbSelect('card_catalog',
+      `game=eq.pokemon&phash=not.is.null&select=id,phash&limit=1000&offset=${offset}`)
     allPhashes.push(...batch)
-    if (batch.length < PAGE) break
-    offset += PAGE
+    if (batch.length < 1000) break
+    offset += 1000
   }
-  console.log(`  ${allPhashes.length} kort med phash\n`)
+  console.log(`  ${allPhashes.length} Pokémon-kort med phash\n`)
 
   console.log(
-    pad('Kort', 22),
-    pad('Sæt', 20),
-    pad('DB phash', 9),
-    pad('Top-1', 6),
-    pad('Top-3', 6),
-    pad('Top-5', 6),
-    'Dist  Similarity'
+    pad('Kort', 22), pad('Sæt', 18),
+    pad('Ph1', 4), pad('Ph3', 4), pad('Ph5', 4),
+    pad('3sig-1', 7), pad('3sig-3', 7),
+    'OCR-num'
   )
-  console.log('─'.repeat(85))
+  console.log('─'.repeat(80))
 
-  let top1 = 0, top3 = 0, top5 = 0, noPhash = 0, noImage = 0
-  let totalTests = 0
+  let ph1 = 0, ph3 = 0, ph5 = 0
+  let s1  = 0, s3  = 0
+  let ocrHits = 0, ocrTotal = 0
+  let total = 0, noImg = 0
 
   const queue = [...TEST_CARDS]
   while (queue.length) {
-    const batch = queue.splice(0, CONCURRENCY)
-    const results = await Promise.all(batch.map(async ([catalogId, name, set]) => {
+    const chunk = queue.splice(0, CONCURRENCY)
+    const results = await Promise.all(chunk.map(async ([catalogId, name, set]) => {
       const dbCard = dbMap[catalogId]
-
-      if (!dbCard?.image_url) return { catalogId, name, set, skip: 'ingen image_url i DB' }
-      if (!dbCard?.phash)     return { catalogId, name, set, skip: 'ingen phash i DB' }
+      if (!dbCard?.image_url) return { skip: 'no-image', name, set }
+      if (!dbCard?.phash)     return { skip: 'no-phash', name, set }
 
       try {
-        // Download officielt kortbillede
         const buf      = await downloadImage(dbCard.image_url)
         const computed = await computePhash(buf)
 
         // Signal 1: phash → top 50
-        const phashTop50 = allPhashes
+        const byPhash = allPhashes
           .map(c => ({ id: c.id, dist: hammingDistance(computed, c.phash) }))
           .sort((a, b) => a.dist - b.dist)
           .slice(0, 50)
 
-        // Signal 2: kortnummer OCR
-        let ocrNumber = null
-        let numberIds = new Set()
-        try {
-          const numResult = await extractCardNumber(buf, 'pokemon')
-          if (numResult) {
-            ocrNumber = numResult
-            // Find kandidater med samme nummer i top-50
-            const dbNum = await dbSelect('card_catalog', `game=eq.pokemon&number=eq.${encodeURIComponent(numResult)}&select=id&limit=20`)
-            dbNum.forEach(r => numberIds.add(r.id))
-          }
-        } catch { /* ignore */ }
+        const phashRank = byPhash.findIndex(c => c.id === catalogId) + 1
 
-        // Signal 3: Meilisearch nummer-søgning
-        let meiliIds = new Set()
-        if (ocrNumber) {
-          const hits = await searchCards(ocrNumber, { gameId: 'pokemon', limit: 10 }).catch(() => [])
-          hits.forEach(h => meiliIds.add(h.id))
+        // Signal 2: kortnummer OCR (fejler stille)
+        let ocrNum   = null
+        let numberSet = new Set()
+        try {
+          const raw = await extractCardNumber(buf, 'pokemon')
+          if (raw) {
+            ocrNum = raw
+            const rows = await dbSelect('card_catalog',
+              `game=eq.pokemon&number=eq.${encodeURIComponent(raw)}&select=id&limit=30`)
+            rows.forEach(r => numberSet.add(r.id))
+          }
+        } catch { /* tesseract fejlede — fortsæt */ }
+
+        // Signal 3: Meilisearch (hvis OCR gav noget)
+        const meiliSet = new Set()
+        if (ocrNum) {
+          const hits = await searchCards(ocrNum, { gameId: 'pokemon', limit: 10 }).catch(() => [])
+          hits.forEach(h => meiliSet.add(h.id))
         }
 
-        // Kombiner scores — phash primær, OCR/Meilisearch additive bonus
-        const ranked = phashTop50.map(c => {
-          const sim         = 1 - c.dist / 64
-          const numberBonus = numberIds.has(c.id) ? 0.50 : 0
-          const meiliBonus  = meiliIds.has(c.id)  ? 0.10 : 0
-          return { id: c.id, dist: c.dist, total: sim + numberBonus + meiliBonus }
-        }).sort((a, b) => b.total - a.total).slice(0, 5)
+        // 3-signal ranking: phash primær, resten additive bonus
+        const combined = byPhash.map(c => ({
+          id:    c.id,
+          dist:  c.dist,
+          score: (1 - c.dist / 64)
+                 + (numberSet.has(c.id) ? 0.50 : 0)
+                 + (meiliSet.has(c.id)  ? 0.10 : 0),
+        })).sort((a, b) => b.score - a.score)
 
-        const rank = ranked.findIndex(([id]) => id === catalogId) + 1
-        const bestPhash = phashTop50[0]
-        const similarity = bestPhash ? 1 - bestPhash.dist / 64 : 0
+        const sigRank = combined.findIndex(c => c.id === catalogId) + 1
+
+        const ocrCorrect = ocrNum !== null && numberSet.has(catalogId)
 
         return {
           catalogId, name, set,
-          rank,
-          dist:       bestPhash?.dist ?? 64,
-          similarity: similarity.toFixed(3),
-          inTop1:     rank === 1,
-          inTop3:     rank >= 1 && rank <= 3,
-          inTop5:     rank >= 1 && rank <= 5,
-          hasPhash:   true,
-          ocrNumber,
-          numberHit:  numberIds.has(catalogId),
+          phashRank, sigRank,
+          dist:       byPhash[0]?.dist ?? 64,
+          similarity: byPhash[0] ? (1 - byPhash[0].dist / 64).toFixed(3) : '0',
+          ocrNum,
+          ocrCorrect,
         }
       } catch (e) {
-        return { catalogId, name, set, skip: e.message.slice(0, 40) }
+        return { skip: e.message.slice(0, 50), name, set }
       }
     }))
 
     for (const r of results) {
       if (r.skip) {
-        if (r.skip.includes('phash'))   noPhash++
-        if (r.skip.includes('image'))   noImage++
-        console.log(pad(r.name, 22), pad(r.set, 20), `(spring over: ${r.skip})`)
+        if (r.skip === 'no-image') noImg++
+        console.log(pad(r.name, 22), pad(r.set, 18), `(spring over: ${r.skip})`)
         continue
       }
 
-      totalTests++
-      if (r.inTop1) top1++
-      if (r.inTop3) top3++
-      if (r.inTop5) top5++
+      total++
+      if (r.phashRank === 1) ph1++
+      if (r.phashRank >= 1 && r.phashRank <= 3) ph3++
+      if (r.phashRank >= 1 && r.phashRank <= 5) ph5++
+      if (r.sigRank  === 1) s1++
+      if (r.sigRank  >= 1 && r.sigRank  <= 3) s3++
+      if (r.ocrNum !== null) { ocrTotal++; if (r.ocrCorrect) ocrHits++ }
 
-      const rankStr  = r.rank === 0 ? '✗    ' : r.rank === 1 ? '✅   ' : `#${r.rank}   `
-      const top3Str  = r.inTop3 ? '✓    ' : '✗    '
-      const top5Str  = r.inTop5 ? '✓    ' : '✗    '
-      const ocrStr   = r.ocrNumber ? (r.numberHit ? `✅ ${r.ocrNumber}` : `🔢 ${r.ocrNumber}`) : '—'
+      const mk = (b) => b ? '✅' : '✗ '
+      const ocrStr = r.ocrNum
+        ? (r.ocrCorrect ? `✅${r.ocrNum}` : `🔢${r.ocrNum}`)
+        : '—'
 
       console.log(
-        pad(r.name, 22),
-        pad(r.set, 18),
-        pad(rankStr, 6),
-        pad(top3Str, 6),
-        pad(top5Str, 6),
-        `${String(r.dist).padStart(2)}  ${r.similarity}  ${ocrStr}`
+        pad(r.name, 22), pad(r.set, 18),
+        pad(mk(r.phashRank === 1), 4),
+        pad(mk(r.phashRank <= 3 && r.phashRank > 0), 4),
+        pad(mk(r.phashRank <= 5 && r.phashRank > 0), 4),
+        pad(mk(r.sigRank  === 1), 7),
+        pad(mk(r.sigRank  <= 3 && r.sigRank > 0), 7),
+        ocrStr
       )
     }
-    await sleep(200)
+    await sleep(150)
   }
 
-  console.log('─'.repeat(85))
+  console.log('─'.repeat(80))
   console.log(`
 ━━━ SAMLET RESUMÉ ━━━
 
-Phash top-1:     ${pct(top1, totalTests)}  (${top1}/${totalTests})
-Phash top-3:     ${pct(top3, totalTests)}  (${top3}/${totalTests})
-Phash top-5:     ${pct(top5, totalTests)}  (${top5}/${totalTests})
-Ingen phash i DB:  ${noPhash}
-Ingen billede:     ${noImage}
+             phash-only    3-signal (phash+OCR+meili)
+Top-1:       ${pct(ph1,total).padEnd(12)} ${pct(s1,total)}
+Top-3:       ${pct(ph3,total).padEnd(12)} ${pct(s3,total)}
+Top-5:       ${pct(ph5,total).padEnd(12)} —
 
-Pool størrelse: ${allPhashes.length} Pokémon-kort med phash
+OCR kortnummer: ${ocrHits}/${ocrTotal} korrekt (${pct(ocrHits,ocrTotal)}) på renders
+Ingen billede:  ${noImg}
+Pool:           ${allPhashes.length} kort med phash
 
-ℹ️  Test bruger officielle renders — rigtige kortfotos giver typisk lidt lavere similarity
-ℹ️  Similarity ≥ 0.90 = sikkert match, ≥ 0.75 = sandsynligt match
+ℹ️  Renders er best-case for phash, worst-case for OCR (stiliseret font).
+ℹ️  På rigtige kortfotos forventes: phash lidt lavere, OCR markant højere.
 `)
+
+  process.exit(0)
 }
 
 run().catch(err => { console.error(err); process.exit(1) })
