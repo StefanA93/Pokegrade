@@ -134,18 +134,13 @@ async function run() {
           hits.forEach(h => meiliIds.add(h.id))
         }
 
-        // Kombiner scores
-        const scores = new Map()
-        phashTop50.forEach(c => {
-          const sim = 1 - c.dist / 64
-          scores.set(c.id, (scores.get(c.id) || 0) + sim * 0.40)
-        })
-        numberIds.forEach(id => scores.set(id, (scores.get(id) || 0) + 0.45))
-        meiliIds.forEach(id  => scores.set(id, (scores.get(id) || 0) + 0.15))
-
-        const ranked = [...scores.entries()]
-          .sort((a, b) => b[1] - a[1])
-          .slice(0, 5)
+        // Kombiner scores — phash primær, OCR/Meilisearch additive bonus
+        const ranked = phashTop50.map(c => {
+          const sim         = 1 - c.dist / 64
+          const numberBonus = numberIds.has(c.id) ? 0.50 : 0
+          const meiliBonus  = meiliIds.has(c.id)  ? 0.10 : 0
+          return { id: c.id, dist: c.dist, total: sim + numberBonus + meiliBonus }
+        }).sort((a, b) => b.total - a.total).slice(0, 5)
 
         const rank = ranked.findIndex(([id]) => id === catalogId) + 1
         const bestPhash = phashTop50[0]

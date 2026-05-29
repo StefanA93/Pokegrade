@@ -173,33 +173,29 @@ async function meiliSearch(query, game, limit = 10) {
 }
 
 // ─── Kombineret ranking ────────────────────────────────────────────────────
-function rankCandidates({ phashCandidates, numberCandidates, meiliCandidates, uploadedPhash }) {
-  const scores = new Map()
+// Princip: phash er primær. OCR + Meilisearch er KUN additive bonusser.
+// En kandidat kan aldrig falde pga. OCR — kun stige hvis nummer matcher.
+function rankCandidates({ phashCandidates, numberCandidates, meiliCandidates }) {
+  const numberIds = new Set(numberCandidates.map(c => c.id))
+  const meiliMap  = new Map(meiliCandidates.map(c => [c.id, c._searchScore ?? 0.5]))
 
-  const add = (id, source, score) => {
-    if (!scores.has(id)) scores.set(id, { id, sources: {}, total: 0 })
-    const entry = scores.get(id)
-    entry.sources[source] = score
-    entry.total += score
-  }
+  return phashCandidates.map(c => {
+    const phashSim    = Math.max(0, 1 - c.dist / 64)
+    const numberBonus = numberIds.has(c.id) ? 0.50 : 0          // stærk bekræftelse
+    const meiliBonus  = (meiliMap.get(c.id) ?? 0) * 0.10        // svag tekst-boost
+    const total       = phashSim + numberBonus + meiliBonus
 
-  // phash signal (vægter 40%)
-  phashCandidates.forEach(c => {
-    const sim = Math.max(0, 1 - c.dist / 64)
-    add(c.id, 'phash', sim * 0.40)
-  })
-
-  // Kortnummer signal (vægter 45% — meget præcist signal)
-  numberCandidates.forEach(c => {
-    add(c.id, 'number', 0.45)
-  })
-
-  // Meilisearch tekst signal (vægter 15%)
-  meiliCandidates.forEach(c => {
-    add(c.id, 'meili', (c._searchScore || 0.5) * 0.15)
-  })
-
-  return [...scores.values()].sort((a, b) => b.total - a.total)
+    return {
+      id:      c.id,
+      dist:    c.dist,
+      total,
+      sources: {
+        phash:  phashSim,
+        number: numberBonus,
+        meili:  meiliBonus,
+      },
+    }
+  }).sort((a, b) => b.total - a.total)
 }
 
 // ─── Handler ───────────────────────────────────────────────────────────────
