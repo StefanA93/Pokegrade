@@ -10,7 +10,7 @@ import { dbSelect, dbUpdate, dbCount } from '../server/middleware/db.js'
 
 const GAME              = process.argv[2] || 'pokemon'
 const CONCURRENCY       = GAME === 'mtg' ? 3 : 8   // Scryfall er rate-limited
-const PATCH_CONCURRENCY = 40   // parallelle DB-patches per batch
+const PATCH_CONCURRENCY = 10   // parallelle DB-patches per batch
 const BATCH_SIZE        = 200  // antal kort per runde
 const TIMEOUT_MS        = 20000
 const DELAY_BATCH_MS    = GAME === 'mtg' ? 800 : 300

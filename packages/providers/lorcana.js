@@ -1,49 +1,56 @@
 import { TCGProvider } from './base.js'
 
-const RAPIDAPI_HOST = 'cardmarket-api-tcg.p.rapidapi.com'
-const BASE          = `https://${RAPIDAPI_HOST}`
+const BASE = 'https://api.tcgapi.dev/v1'
 
 export class LorcanaProvider extends TCGProvider {
   get headers() {
-    return {
-      'x-rapidapi-key':  this.config.apiKey,
-      'x-rapidapi-host': RAPIDAPI_HOST,
-    }
+    return this.config.apiKey
+      ? { 'X-API-Key': this.config.apiKey }
+      : {}
   }
 
   async fetchAllSets() {
     if (!this.config.apiKey) return []
-    const r = await this.timedFetch(`${BASE}/lorcana/episodes`, { headers: this.headers })
+    const r = await this.timedFetch(`${BASE}/sets?game=lorcana-tcg&limit=200`, { headers: this.headers })
     if (!r.ok) throw new Error(`HTTP ${r.status} fetching Lorcana sets`)
     const d    = await r.json()
-    const sets = Array.isArray(d) ? d : (d.data || d.episodes || d.sets || [])
+    const sets = Array.isArray(d) ? d : (d.data || d.sets || [])
     return sets.map(s => ({
       name:        s.name       || s.set_name   || null,
       code:        String(s.id  || s.code       || s.set_code || ''),
-      releaseDate: s.releaseDate || s.release_date || null,
-      cardCount:   s.cardCount  || s.card_count  || s.total   || null,
-      imageUrl:    s.image      || s.imageUrl    || s.logo    || null,
-      externalId:  s.id         || s.code        || s.set_code,
-      provider:    'cardmarket-api-tcg',
+      releaseDate: s.release_date || s.releaseDate || null,
+      cardCount:   s.card_count || s.cardCount  || s.total   || null,
+      imageUrl:    s.image_url  || s.imageUrl   || s.logo    || null,
+      externalId:  s.id         || s.code       || s.set_code,
+      provider:    'tcgapi',
     }))
   }
 
   async fetchCardsForSet(externalSetId) {
     if (!this.config.apiKey) return []
-    const r = await this.timedFetch(
-      `${BASE}/lorcana/episodes/${encodeURIComponent(externalSetId)}/cards`,
-      { headers: this.headers }
-    )
-    if (!r.ok) throw new Error(`HTTP ${r.status} fetching Lorcana set ${externalSetId}`)
-    const d     = await r.json()
-    const cards = Array.isArray(d) ? d : (d.data || d.cards || [])
-    return cards.map(c => this.normalizeCard(c))
+    const all  = []
+    let   page = 1
+    while (true) {
+      const r = await this.timedFetch(
+        `${BASE}/sets/${encodeURIComponent(externalSetId)}/cards?limit=50&page=${page}`,
+        { headers: this.headers }
+      )
+      if (!r.ok) break
+      const d     = await r.json()
+      const batch = Array.isArray(d) ? d : (d.data || d.cards || [])
+      if (!batch.length) break
+      const items = batch.filter(c => c.id)
+      all.push(...items.map(c => this.normalizeCard(c)))
+      if (!d.meta?.has_more && batch.length < 50) break
+      page++
+    }
+    return all
   }
 
   async fetchCard(name) {
     if (!this.config.apiKey) return null
     const r = await this.timedFetch(
-      `${BASE}/lorcana/cards?search=${encodeURIComponent(name)}`,
+      `${BASE}/search?q=${encodeURIComponent(name)}&game=lorcana-tcg&limit=1`,
       { headers: this.headers }
     )
     if (!r.ok) return null
@@ -53,27 +60,28 @@ export class LorcanaProvider extends TCGProvider {
   }
 
   normalizeCard(c) {
-    // Håndterer multiple mulige felt-navne fra API'et
-    const priceEur = parseFloat(
-      c.price_eur ?? c.priceEur ?? c.price ?? c.cardmarket_price ?? c.market_price
-    ) || null
-    const cmUrl = c.cardmarket_url || c.cm_url || c.url || null
+    const priceUsd  = parseFloat(c.market_price || c.price || c.price_usd || c.low_price) || null
+    const priceEur  = priceUsd ? parseFloat((priceUsd * 0.92).toFixed(2)) : null
+    const isFoil    = !!(c.foil || c.is_foil || c.isFoil || c.printing === 'Foil')
+    const isProduct = c.product_type === 'Sealed Products' || !c.number
+    const number    = c.number || c.card_number || c.cardNumber || `product-${c.id}`
 
     return {
       name:        c.name,
-      number:      c.number || c.cardNumber || c.card_number || null,
-      rarity:      c.rarity || null,
-      setCode:     String(c.episode_id || c.set_id || c.setId || c.episodeId || ''),
-      setName:     c.episode_name || c.set_name || c.setName || null,
-      finishTypes: c.foil || c.isFoil ? ['Normal', 'Foil'] : ['Normal'],
-      imageUrl:    c.image || c.imageUrl || c.image_url || null,
-      providerIds: { 'cardmarket-api-tcg': String(c.id || '') },
-      prices:      priceEur ? { Normal: { sell: priceEur, cmUrl } } : null,
+      number,
+      rarity:      isProduct ? null : (c.rarity || null),
+      setCode:     String(c.set_id || c.setId || c.group_id || ''),
+      setName:     c.set_name || c.setName || null,
+      finishTypes: isFoil ? ['Normal', 'Foil'] : ['Normal'],
+      imageUrl:    c.image_url || c.imageUrl || c.image || null,
+      providerIds: { tcgapi: String(c.id || c.tcgplayer_id || '') },
+      prices:      priceEur ? { Normal: { sell: priceEur, cmUrl: null } } : null,
       metadata: {
-        color:    c.color    || null,
-        cost:     c.cost     ?? null,
-        inkable:  c.inkable  ?? null,
-        strength: c.strength ?? null,
+        isProduct,
+        color:     c.color     || null,
+        cost:      c.cost      ?? null,
+        inkable:   c.inkable   ?? null,
+        strength:  c.strength  ?? null,
         willpower: c.willpower ?? null,
       },
     }

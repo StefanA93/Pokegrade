@@ -54,43 +54,38 @@ async function _handler(req) {
     return new Response(JSON.stringify({ error: 'Invalid session' }), { status: 401 })
   }
 
-  // Tjek scan-limit (30/dag for Pro, 3 lifetime for gratis) — parallel for speed
+  // AI Grade er kun for Pro — kredit-system: 10/dag, akkumulerer op til 30
+  const AI_CREDITS_PER_DAY = 10
+  const AI_CREDITS_MAX     = 30
   const today = new Date().toISOString().slice(0, 10)
-  const [logsRes, profileRes] = await Promise.all([
-    fetch(
-      `${SUPABASE_URL}/rest/v1/scan_logs?user_id=eq.${userId}&scan_date=eq.${today}&select=count`,
-      {
-        headers: {
-          Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
-          apikey: SUPABASE_SERVICE_KEY,
-          'Content-Type': 'application/json',
-          Prefer: 'count=exact'
-        }
-      }
-    ),
-    fetch(
-      `${SUPABASE_URL}/rest/v1/profiles?id=eq.${userId}&select=is_pro,total_scans`,
-      {
-        headers: {
-          Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
-          apikey: SUPABASE_SERVICE_KEY
-        }
-      }
-    )
-  ])
-  const countHeader = logsRes.headers.get('content-range')
-  const dailyCount = countHeader ? parseInt(countHeader.split('/')[1] || '0') : 0
-  const profiles = await profileRes.json()
-  const profile = profiles[0] || { is_pro: false, total_scans: 0 }
 
-  if (profile.is_pro) {
-    if (dailyCount >= 30) {
-      return new Response(JSON.stringify({ error: 'Daily limit reached (30 scans). Try again tomorrow.' }), { status: 429 })
-    }
+  const profileRes = await fetch(
+    `${SUPABASE_URL}/rest/v1/profiles?id=eq.${userId}&select=is_pro,total_scans,ai_grade_credits,ai_credits_date`,
+    { headers: { Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`, apikey: SUPABASE_SERVICE_KEY } }
+  )
+  const profiles = await profileRes.json()
+  const profile = profiles[0] || { is_pro: false, total_scans: 0, ai_grade_credits: 0, ai_credits_date: null }
+
+  if (!profile.is_pro) {
+    return new Response(JSON.stringify({ error: 'AI Grade requires a Pro subscription.', proRequired: true }), { status: 403 })
+  }
+
+  // Beregn effektive kreditter inkl. akkumulering siden sidst
+  const storedCredits = profile.ai_grade_credits ?? 0
+  const lastDateStr    = profile.ai_credits_date
+  let currentCredits
+  if (!lastDateStr) {
+    currentCredits = AI_CREDITS_PER_DAY
   } else {
-    if (profile.total_scans >= 3) {
-      return new Response(JSON.stringify({ error: 'You have used your 3 free scans. Upgrade to Pro for unlimited scans.' }), { status: 429 })
-    }
+    const daysDiff = Math.max(0, Math.floor((new Date(today) - new Date(lastDateStr)) / 86400000))
+    currentCredits = Math.min(storedCredits + daysDiff * AI_CREDITS_PER_DAY, AI_CREDITS_MAX)
+  }
+
+  if (currentCredits < 1) {
+    return new Response(JSON.stringify({
+      error: `No AI Grade credits left. You earn ${AI_CREDITS_PER_DAY} per day — check back tomorrow!`,
+      creditsExhausted: true,
+    }), { status: 429 })
   }
 
   // Parse request body
@@ -251,7 +246,7 @@ async function _handler(req) {
         }
       }
 
-      const CATALOG_GAMES = ['pokemon', 'mtg', 'yugioh']
+      const CATALOG_GAMES = ['pokemon', 'mtg', 'yugioh', 'onepiece', 'lorcana', 'dragonball']
 
       if (cardName && CATALOG_GAMES.includes(game)) {
         const catalogHeaders = {
@@ -259,7 +254,7 @@ async function _handler(req) {
           Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
           'Content-Type': 'application/json',
         }
-        const fields = 'id,image_url,cardmarket_url,price_eur,rarity,set_name,number'
+        const fields = 'id,image_url,cardmarket_url,price_eur,price_avg7,price_avg30,price_low,price_sell,rarity,set_name,number,finish_types'
 
         // Map AI finish labels → pokemontcg.io rarity strings
         function finishToRarity(finish) {
@@ -307,7 +302,12 @@ async function _handler(req) {
         function applyHit(row, strategy) {
           catalogId = row.id
           officialImageUrl = row.image_url
-          catalogPriceEur = row.price_eur
+          // Prioritér card_prices-kolonner (dagligt synkroniserede) over catalog snapshot
+          catalogPriceEur = row.price_sell ?? row.price_avg7 ?? row.price_eur ?? null
+          catalogPriceAvg7 = row.price_avg7 ?? null
+          catalogPriceAvg30 = row.price_avg30 ?? null
+          catalogPriceLow = row.price_low ?? null
+          catalogPriceSell = row.price_sell ?? null
           catalogCardmarketUrl = row.cardmarket_url
           debugInfo.catalogHit = true
           debugInfo.source = strategy || 'supabase'
@@ -1537,7 +1537,7 @@ async function _handler(req) {
     body: JSON.stringify({ user_id: userId, scan_date: today, game })
   })
 
-  // Opdater total_scans i profiles
+  // Træk én kredit og opdater dato
   await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${userId}`, {
     method: 'PATCH',
     headers: {
@@ -1545,7 +1545,7 @@ async function _handler(req) {
       apikey: SUPABASE_SERVICE_KEY,
       'Content-Type': 'application/json'
     },
-    body: JSON.stringify({ total_scans: (profile.total_scans || 0) + 1 })
+    body: JSON.stringify({ ai_grade_credits: currentCredits - 1, ai_credits_date: today })
   })
 
   return new Response(JSON.stringify({
