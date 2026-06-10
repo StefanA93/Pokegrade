@@ -22,7 +22,7 @@ async function fetchAllSets() {
     const d = await r.json()
     const batch = d.data || []
     all.push(...batch)
-    if (!d.meta?.has_more || batch.length < 100) break
+    if (!d.meta?.has_more) break
     page++
     await sleep(150)
   }
@@ -33,13 +33,13 @@ async function fetchSetCards(setId) {
   const cards = []
   let page = 1
   while (true) {
-    const r = await fetch(`${BASE}/sets/${setId}/cards?limit=100&page=${page}`, { headers: HEADERS })
+    const r = await fetch(`${BASE}/sets/${setId}/cards?page=${page}`, { headers: HEADERS })
     if (!r.ok) break
     const d = await r.json()
     const batch = d.data || []
     if (!batch.length) break
     cards.push(...batch)
-    if (!d.meta?.has_more && batch.length < 100) break
+    if (!d.meta?.has_more) break
     page++
     await sleep(100)
   }
