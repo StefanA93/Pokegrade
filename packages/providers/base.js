@@ -8,7 +8,7 @@ export class TCGProvider {
   async fetchCard(externalId) { throw new Error(`${this.constructor.name}.fetchCard not implemented`) }
   async fetchPrices(externalId) { return null }
 
-  timedFetch(url, opts = {}, ms = 8000) {
+  timedFetch(url, opts = {}, ms = 30000) {
     const ctrl = new AbortController()
     const t = setTimeout(() => ctrl.abort(), ms)
     return fetch(url, { ...opts, signal: ctrl.signal }).finally(() => clearTimeout(t))

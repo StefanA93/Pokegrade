@@ -15,6 +15,11 @@
  */
 import 'dotenv/config'
 import { dbUpsert, dbCount } from '../server/middleware/db.js'
+import { readFileSync, writeFileSync, existsSync } from 'fs'
+import { join, dirname } from 'path'
+import { fileURLToPath } from 'url'
+
+const __dir = dirname(fileURLToPath(import.meta.url))
 
 const TCGAPI_SLUG = process.argv[2]
 const BASE        = 'https://api.tcgapi.dev/v1'
@@ -47,8 +52,7 @@ function buildCatalogId(gameId, setId, number) {
 }
 
 function normalizeCard(c, gameId) {
-  const priceUsd = c.market_price || c.low_price || null
-  const setSlug  = (c.set_name || 'unknown').replace(/[^a-zA-Z0-9]/g, '').toLowerCase().slice(0, 20)
+  const setSlug = (c.set_name || 'unknown').replace(/[^a-zA-Z0-9]/g, '').toLowerCase().slice(0, 20)
   return {
     id:           buildCatalogId(gameId, setSlug, c.number),
     game:         gameId,
@@ -59,7 +63,6 @@ function normalizeCard(c, gameId) {
     rarity:       c.rarity || null,
     finish_types: [c.printing || 'Normal'],
     image_url:    c.image_url || null,
-    price_eur:    priceUsd ? parseFloat((priceUsd / 1.08).toFixed(2)) : null,
     updated_at:   new Date().toISOString(),
   }
 }
@@ -125,16 +128,39 @@ const SWEEP_PREFIXES = [
 ]
 
 async function upsertCards(cards) {
-  const rows  = cards.map(c => normalizeCard(c, GAME_ID))
-  const CHUNK = 200
+  const allRows = cards.map(c => normalizeCard(c, GAME_ID))
+  // Dedupliker på catalog ID + filtrer kort uden billede (image_url er NOT NULL i DB)
+  const rows  = [...new Map(allRows.filter(r => r.image_url).map(r => [r.id, r])).values()]
+  const CHUNK = 20   // små chunks undgår Supabase statement timeout
   let saved   = 0
   for (let i = 0; i < rows.length; i += CHUNK) {
     try {
       await dbUpsert('card_catalog', rows.slice(i, i + CHUNK), 'id')
       saved += Math.min(CHUNK, rows.length - i)
-    } catch { /* skip chunk */ }
+    } catch (e) {
+      console.error('\n❌ Upsert fejl:', e.message.slice(0, 120))
+    }
+    await new Promise(r => setTimeout(r, 200))  // pause mellem chunks
   }
   return saved
+}
+
+// ── Fremgangs-fil: gemmer sidste færdige præfiks så vi kan genoptage ──────────
+const PROGRESS_FILE = join(__dir, `.progress-${TCGAPI_SLUG}.txt`)
+
+function loadProgress() {
+  if (!existsSync(PROGRESS_FILE)) return null
+  const saved = readFileSync(PROGRESS_FILE, 'utf8').trim()
+  const idx   = SWEEP_PREFIXES.indexOf(saved)
+  return idx >= 0 ? idx + 1 : null  // start EFTER det gemte præfiks
+}
+
+function saveProgress(prefix) {
+  writeFileSync(PROGRESS_FILE, prefix, 'utf8')
+}
+
+function clearProgress() {
+  if (existsSync(PROGRESS_FILE)) writeFileSync(PROGRESS_FILE, '', 'utf8')
 }
 
 async function sweepAllCards() {
@@ -142,7 +168,13 @@ async function sweepAllCards() {
   let   calls = 0
   let   totalSaved = 0
 
-  for (const prefix of SWEEP_PREFIXES) {
+  const startIdx = loadProgress() ?? 0
+  if (startIdx > 0) {
+    console.log(`  ↩  Genoptager fra præfiks '${SWEEP_PREFIXES[startIdx].trim()}' (springer ${startIdx} over)\n`)
+  }
+
+  for (let i = startIdx; i < SWEEP_PREFIXES.length; i++) {
+    const prefix   = SWEEP_PREFIXES[i]
     const newCards = []
     let page = 1
     while (true) {
@@ -161,8 +193,11 @@ async function sweepAllCards() {
       totalSaved += await upsertCards(newCards)
     }
 
+    saveProgress(prefix)  // gem fremgang efter hvert præfiks
     process.stdout.write(`\r  Præfiks '${prefix.trim().padEnd(2)}' | unikke kort: ${seen.size} | gemt: ${totalSaved} | API-kald: ${calls}  `)
   }
+
+  clearProgress()  // færdig — slet fremgangs-filen
   return { total: seen.size, saved: totalSaved }
 }
 

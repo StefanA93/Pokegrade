@@ -22,17 +22,18 @@ async function fetchBuf(url, attempt = 0) {
   const t    = setTimeout(() => ctrl.abort(), TIMEOUT_MS)
   try {
     const r = await fetch(url, { signal: ctrl.signal })
+    clearTimeout(t)
     if (!r.ok) throw new Error(`HTTP ${r.status}`)
     return Buffer.from(await r.arrayBuffer())
   } catch (err) {
     clearTimeout(t)
-    if (attempt < 2) {
+    // Retry kun på netværksfejl/timeouts — ikke på permanente HTTP 4xx-fejl
+    const isPermanent = /HTTP 4\d\d/.test(err.message)
+    if (!isPermanent && attempt < 2) {
       await sleep(2000 * (attempt + 1))
       return fetchBuf(url, attempt + 1)
     }
     throw err
-  } finally {
-    clearTimeout(t)
   }
 }
 
@@ -41,16 +42,24 @@ async function run() {
   let done    = 0
   let errors  = 0
   let batches = 0
+  const failed = new Set()
 
   console.log(`\nPhash backfill [${GAME}] — ${total} kort mangler phash\n`)
 
-  // Brug ALTID offset=0: processerede kort forsvinder fra phash=is.null-queryen
   while (true) {
-    const rows = await dbSelect(
-      'card_catalog',
-      `game=eq.${GAME}&phash=is.null&image_url=not.is.null&select=id,image_url&limit=${BATCH_SIZE}&offset=0`
-    )
-    if (!rows.length) break
+    // Hop forbi kendte 404-kort ved at øge offset indtil vi finder en brugbar batch
+    let offset = 0
+    let rows   = []
+    while (rows.length === 0) {
+      const all = await dbSelect(
+        'card_catalog',
+        `game=eq.${GAME}&phash=is.null&image_url=not.is.null&select=id,image_url&limit=${BATCH_SIZE}&offset=${offset}`
+      )
+      if (!all.length) { rows = null; break }
+      rows = all.filter(r => !failed.has(r.id))
+      if (rows.length === 0) offset += BATCH_SIZE
+    }
+    if (rows === null) break
 
     // Download og beregn phash parallelt (CONCURRENCY ad gangen)
     const results = []
@@ -63,6 +72,7 @@ async function run() {
           return { id: row.id, phash }
         } catch {
           errors++
+          failed.add(row.id)
           return null
         }
       }))
@@ -78,14 +88,14 @@ async function run() {
 
     batches++
     const pct = total > 0 ? ((done / total) * 100).toFixed(1) : '?'
-    process.stdout.write(`\r  Batch ${batches} | ${done}/${total} (${pct}%) gemt | ${errors} fejl`)
+    process.stdout.write(`\r  Batch ${batches} | ${done}/${total} (${pct}%) gemt | ${errors} fejl (${failed.size} skippet)`)
 
     await sleep(DELAY_BATCH_MS)
   }
 
   console.log(`\n\nFærdig!`)
-  console.log(`  Phash gemt:  ${done}`)
-  console.log(`  Fejl:        ${errors}`)
+  console.log(`  Phash gemt:   ${done}`)
+  console.log(`  Fejl/skippet: ${errors}`)
 }
 
 run().catch(err => { console.error(err); process.exit(1) })

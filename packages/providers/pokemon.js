@@ -10,9 +10,26 @@ export class PokemonProvider extends TCGProvider {
   }
 
   async fetchAllSets() {
-    const r = await this.timedFetch(`${BASE}/sets?pageSize=250&orderBy=-releaseDate`, { headers: this.headers })
-    const { data } = await r.json()
-    return data.map(s => ({
+    const PAGE = 100
+    const all  = []
+    let page   = 1
+
+    while (true) {
+      const r = await this.timedFetch(
+        `${BASE}/sets?pageSize=${PAGE}&page=${page}&orderBy=-releaseDate`,
+        { headers: this.headers }
+      )
+      if (r.status === 429) throw new Error(`Rate limited (429) fetching sets page ${page}`)
+      if (!r.ok) throw new Error(`HTTP ${r.status} fetching sets page ${page}`)
+      const text = await r.text()
+      if (!text) throw new Error(`Empty response fetching sets page ${page}`)
+      const { data, totalCount } = JSON.parse(text)
+      all.push(...(data || []))
+      if (all.length >= totalCount || !(data?.length)) break
+      page++
+    }
+
+    return all.map(s => ({
       name:        s.name,
       code:        s.id,
       releaseDate: s.releaseDate || null,
@@ -24,12 +41,26 @@ export class PokemonProvider extends TCGProvider {
   }
 
   async fetchCardsForSet(externalSetId) {
-    const r = await this.timedFetch(
-      `${BASE}/cards?q=set.id:${externalSetId}&pageSize=500&orderBy=number`,
-      { headers: this.headers }
-    )
-    const { data } = await r.json()
-    return (data || []).map(c => this.normalizeCard(c))
+    const PAGE = 250
+    const all  = []
+    let page   = 1
+
+    while (true) {
+      const r = await this.timedFetch(
+        `${BASE}/cards?q=set.id:${externalSetId}&pageSize=${PAGE}&page=${page}&orderBy=number`,
+        { headers: this.headers }
+      )
+      if (r.status === 429) throw new Error(`Rate limited (429) for set ${externalSetId} page ${page}`)
+      if (!r.ok) throw new Error(`HTTP ${r.status} for set ${externalSetId}`)
+      const text = await r.text()
+      if (!text) throw new Error(`Empty response for set ${externalSetId} page ${page}`)
+      const { data, totalCount } = JSON.parse(text)
+      all.push(...(data || []))
+      if (all.length >= totalCount || !(data?.length)) break
+      page++
+    }
+
+    return all.map(c => this.normalizeCard(c))
   }
 
   async fetchCard(externalId) {

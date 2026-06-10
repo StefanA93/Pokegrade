@@ -96,7 +96,7 @@ async function _handler(req) {
     return new Response(JSON.stringify({ error: 'Invalid JSON' }), { status: 400 })
   }
 
-  const VALID_GAMES = ['pokemon', 'mtg', 'yugioh', 'onepiece', 'dragonball', 'lorcana']
+  const VALID_GAMES = ['pokemon', 'mtg', 'yugioh', 'onepiece', 'dragonball', 'lorcana', 'riftbound']
   const game = VALID_GAMES.includes(body.game) ? body.game : 'pokemon'
   const { frontImage, backImage, numberImage, matchedCard } = body
   // matchedCard: pre-identified card from api/match.js (embedding search)
@@ -246,7 +246,7 @@ async function _handler(req) {
         }
       }
 
-      const CATALOG_GAMES = ['pokemon', 'mtg', 'yugioh', 'onepiece', 'lorcana', 'dragonball']
+      const CATALOG_GAMES = ['pokemon', 'mtg', 'yugioh', 'onepiece', 'lorcana', 'dragonball', 'riftbound']
 
       if (cardName && CATALOG_GAMES.includes(game)) {
         const catalogHeaders = {
@@ -1301,7 +1301,7 @@ async function _handler(req) {
         // Requires CARDMARKET_API_KEY. Live EU prices directly from Cardmarket.
         // Set CARDMARKET_API_KEY in Vercel env vars once you have your key.
         // Endpoint confirmed from RapidAPI dashboard after signup.
-        const CM_GAME_MAP = { onepiece: 'one-piece', lorcana: 'lorcana' }
+        const CM_GAME_MAP = { onepiece: 'one-piece', lorcana: 'lorcana', riftbound: 'riftbound' }
         if (CM_GAME_MAP[game] && cardName && !catalogId && CARDMARKET_API_KEY) {
           try {
             const ctrl = new AbortController()
@@ -1643,7 +1643,8 @@ function buildIdentifyPrompt(game, hasBack) {
     yugioh: 'Yu-Gi-Oh!',
     onepiece: 'One Piece',
     dragonball: 'Dragon Ball Super',
-    lorcana: 'Disney Lorcana'
+    lorcana: 'Disney Lorcana',
+    riftbound: 'Riftbound'
   }
   const gameName = gameNames[game] || game || 'TCG'
 

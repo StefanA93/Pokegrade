@@ -3,6 +3,9 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "vite",
     "build": "vite build",
@@ -12,7 +15,19 @@
     "worker": "node worker/index.js",
     "worker:dev": "node --watch worker/index.js",
     "bootstrap": "node scripts/bootstrap.js",
-    "queue:status": "node scripts/queue-status.js"
+    "queue:status": "node scripts/queue-status.js",
+    "images": "node scripts/process-images-direct.js",
+    "prices:pokemon": "node scripts/backfill-pokemon-prices.js",
+    "backfill:pokemon": "node scripts/backfill-pokemon.js",
+    "backfill:phash": "node scripts/backfill-phash-only.js",
+    "reindex": "node scripts/reindex-with-phash.js",
+    "test:scan": "node scripts/test-scan-accuracy.js",
+    "prices:cm": "node scripts/backfill-cm-prices.js all",
+    "prices:mtg": "node scripts/backfill-mtg-prices.js",
+    "prices:yugioh": "node scripts/backfill-yugioh-prices.js",
+    "prices:dragonball": "node scripts/backfill-dragonball-prices.js",
+    "prices:pokemonjp": "node scripts/backfill-pokemonjp-prices.js",
+    "prices:all": "npm run prices:cm && npm run prices:mtg && npm run prices:yugioh && npm run prices:dragonball && npm run prices:pokemonjp"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.600.0",

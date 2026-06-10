@@ -1,10 +1,13 @@
 import { TCGProvider } from './base.js'
 
-const BASE = 'https://api.scryfall.com'
+const BASE    = 'https://api.scryfall.com'
+const HEADERS = { 'User-Agent': 'GradeDex/1.0 (gradedex.app)' }
 
 export class MTGProvider extends TCGProvider {
+  scryfetch(url) { return this.timedFetch(url, { headers: HEADERS }) }
+
   async fetchAllSets() {
-    const r = await this.timedFetch(`${BASE}/sets`)
+    const r = await this.scryfetch(`${BASE}/sets`)
     const { data } = await r.json()
     return data
       .filter(s => ['expansion', 'core', 'masters', 'draft_innovation', 'commander'].includes(s.set_type))
@@ -23,7 +26,7 @@ export class MTGProvider extends TCGProvider {
     const cards = []
     let url = `${BASE}/cards/search?q=e:${setCode}&unique=prints&order=collector_number`
     while (url) {
-      const r = await this.timedFetch(url)
+      const r = await this.scryfetch(url)
       const d = await r.json()
       if (d.object === 'error') break
       cards.push(...(d.data || []).map(c => this.normalizeCard(c)))
@@ -34,7 +37,7 @@ export class MTGProvider extends TCGProvider {
   }
 
   async fetchCard(nameOrId) {
-    const r = await this.timedFetch(`${BASE}/cards/named?fuzzy=${encodeURIComponent(nameOrId)}`)
+    const r = await this.scryfetch(`${BASE}/cards/named?fuzzy=${encodeURIComponent(nameOrId)}`)
     const d = await r.json()
     return d.object === 'error' ? null : this.normalizeCard(d)
   }

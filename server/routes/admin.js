@@ -1,7 +1,11 @@
 import { verifyServiceKey } from '../middleware/auth.js'
 import { indexStatus, configureIndex } from '../../packages/search/index.js'
-import { syncQueue, priceQueue, imageQueue } from '../../worker/queues.js'
 import { getAllGameIds } from '../../packages/providers/index.js'
+
+async function loadQueues() {
+  const mod = await import('../../worker/queues.js')
+  return { syncQueue: mod.syncQueue, priceQueue: mod.priceQueue, imageQueue: mod.imageQueue }
+}
 
 export async function adminRoutes(fastify) {
   fastify.post('/admin/sync/:gameId', { preHandler: verifyServiceKey }, async (req, reply) => {
@@ -12,6 +16,7 @@ export async function adminRoutes(fastify) {
       return reply.code(400).send({ error: { code: 'BAD_REQUEST', message: `Unknown game: ${gameId}` } })
     }
 
+    const { syncQueue } = await loadQueues()
     const games = gameId === 'all' ? validGames : [gameId]
     const jobs  = await Promise.all(games.map(g => syncQueue.add('sync-game', { gameId: g })))
 
@@ -20,18 +25,21 @@ export async function adminRoutes(fastify) {
 
   fastify.post('/admin/sync-prices/:gameId', { preHandler: verifyServiceKey }, async (req, reply) => {
     const { gameId } = req.params
+    const { priceQueue } = await loadQueues()
     await priceQueue.add('sync-prices', { gameId })
     return { queued: true, gameId }
   })
 
   fastify.post('/admin/reindex', { preHandler: verifyServiceKey }, async (req, reply) => {
     await configureIndex()
+    const { syncQueue } = await loadQueues()
     const games = getAllGameIds()
     const jobs  = await Promise.all(games.map(g => syncQueue.add('reindex-game', { gameId: g })))
     return { queued: jobs.length }
   })
 
   fastify.get('/admin/queue/status', { preHandler: verifyServiceKey }, async () => {
+    const { syncQueue, priceQueue, imageQueue } = await loadQueues()
     const [syncCounts, priceCounts, imageCounts] = await Promise.all([
       syncQueue.getJobCounts(),
       priceQueue.getJobCounts(),

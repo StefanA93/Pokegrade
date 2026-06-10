@@ -41,7 +41,7 @@ export default async function handler(req) {
   const filters = []
 
   if (game) {
-    const VALID_GAMES = ['pokemon', 'mtg', 'yugioh', 'onepiece', 'dragonball', 'lorcana']
+    const VALID_GAMES = ['pokemon', 'mtg', 'yugioh', 'onepiece', 'dragonball', 'lorcana', 'riftbound']
     if (VALID_GAMES.includes(game)) filters.push(`game=eq.${encodeURIComponent(game)}`)
   }
 

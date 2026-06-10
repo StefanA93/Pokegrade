@@ -24,7 +24,7 @@ const CORS = {
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 }
 
-const VALID_GAMES = ['pokemon', 'pokemonjp', 'mtg', 'yugioh', 'onepiece', 'lorcana', 'dragonball']
+const VALID_GAMES = ['pokemon', 'pokemonjp', 'mtg', 'yugioh', 'onepiece', 'lorcana', 'dragonball', 'riftbound']
 
 // ─── phash (fallback) ──────────────────────────────────────────────────────
 async function computePhash(buf) {

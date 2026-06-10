@@ -15,7 +15,7 @@
  */
 
 import 'dotenv/config'
-import { pipeline, env } from '@huggingface/transformers'
+import { pipeline, env, RawImage } from '@huggingface/transformers'
 import { dbSelect, dbUpdate, dbCount } from '../server/middleware/db.js'
 
 // ── Konfiguration ─────────────────────────────────────────────────────────────
@@ -42,27 +42,12 @@ async function getExtractor() {
   return _extractor
 }
 
-// ── Billede-download ──────────────────────────────────────────────────────────
-async function fetchImageAsDataUrl(url) {
-  const ctrl = new AbortController()
-  const t    = setTimeout(() => ctrl.abort(), TIMEOUT_MS)
-  try {
-    const r = await fetch(url, { signal: ctrl.signal })
-    if (!r.ok) throw new Error(`HTTP ${r.status}`)
-    const buf    = Buffer.from(await r.arrayBuffer())
-    const mime   = r.headers.get('content-type') || 'image/jpeg'
-    return `data:${mime};base64,${buf.toString('base64')}`
-  } finally {
-    clearTimeout(t)
-  }
-}
-
-// ── Embedding-beregning ───────────────────────────────────────────────────────
+// ── Embedding-beregning via RawImage (korrekt Node.js format) ────────────────
 async function computeEmbedding(imageUrl) {
   const model  = await getExtractor()
-  const dataUrl = await fetchImageAsDataUrl(imageUrl)
-  const output  = await model(dataUrl, { pooling: 'mean', normalize: true })
-  return Array.from(output.data)   // float32[] med 512 dimensioner
+  const image  = await RawImage.fromURL(imageUrl)   // native Node.js image load
+  const output = await model(image, { pooling: 'mean', normalize: true })
+  return Array.from(output.data)                     // float32[] med 512 dimensioner
 }
 
 // ── Supabase patch (embedding som pgvector-format) ───────────────────────────
@@ -101,15 +86,22 @@ async function run() {
   // Pre-load model
   await getExtractor()
 
-  let done   = 0
-  let errors = 0
-  let offset = 0
+  let done    = 0
+  let errors  = 0
+  const failed = new Set()   // kortID'er med 404/permanente fejl
 
   while (true) {
-    const rows = await fetchMissingBatch(GAME, 0)  // offset=0 da processerede forsvinder fra embedding=is.null
-    if (!rows.length) break
+    // Hent med stigende offset for at komme forbi failed-kort der sidder i toppen
+    let offset = 0
+    let rows   = []
+    while (rows.length === 0) {
+      const all = await fetchMissingBatch(GAME, offset)
+      if (all.length === 0) { rows = null; break }          // ingenting tilbage i DB
+      rows = all.filter(r => !failed.has(r.id))
+      if (rows.length === 0) offset += BATCH_SIZE           // alle i batch er failed → hop frem
+    }
+    if (rows === null) break                                 // DB er tømt
 
-    // Paralleliser i chunks af CONCURRENCY
     for (let i = 0; i < rows.length; i += CONCURRENCY) {
       const chunk = rows.slice(i, i + CONCURRENCY)
 
@@ -118,8 +110,10 @@ async function run() {
           const embedding = await computeEmbedding(row.image_url)
           await saveEmbedding(row.id, embedding)
           done++
-        } catch {
+        } catch (e) {
           errors++
+          failed.add(row.id)
+          if (errors <= 5) console.error(`\n  Fejl (${row.id}): ${e.message}`)
         }
       }))
 

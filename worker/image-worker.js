@@ -1,5 +1,5 @@
 import { Worker } from 'bullmq'
-import { getRedis, cacheDel, CacheKeys } from '../packages/cache/index.js'
+import { getBullRedis, cacheDel, CacheKeys } from '../packages/cache/index.js'
 import { processAndUpload } from '../packages/storage/index.js'
 import { computePhash } from '../packages/scanner/index.js'
 import { dbUpdate, dbSelect } from '../server/middleware/db.js'
@@ -12,7 +12,7 @@ export function createImageWorker() {
       await handleDownloadImage(job)
     }
   }, {
-    connection: getRedis(),
+    connection: getBullRedis(),
     concurrency: 5,
     limiter: { max: 30, duration: 60000 },
   })

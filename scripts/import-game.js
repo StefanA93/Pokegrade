@@ -25,7 +25,7 @@ const MAX_SET_ERRORS = 3
 
 if (!GAME) {
   console.error('Brug: node scripts/import-game.js <game>')
-  console.error('Spil: yugioh | onepiece | lorcana | dragonball | mtg | pokemon | pokemonjp')
+  console.error('Spil: yugioh | onepiece | lorcana | dragonball | mtg | pokemon | pokemonjp | riftbound')
   process.exit(1)
 }
 

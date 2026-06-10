@@ -7,7 +7,7 @@ import { indexCards } from '../packages/search/index.js'
 import { dbSelect } from '../server/middleware/db.js'
 
 const BATCH  = 1000
-const GAMES  = ['pokemon']
+const GAMES  = ['pokemon', 'yugioh', 'mtg', 'lorcana', 'onepiece', 'dragonball', 'pokemonjp']
 
 async function run() {
   for (const game of GAMES) {
@@ -19,23 +19,28 @@ async function run() {
     while (true) {
       const rows = await dbSelect(
         'card_catalog',
-        `game=eq.${game}&select=id,name,number,set_id,set_name,rarity,finish_types,image_url,thumb_key,phash&limit=${BATCH}&offset=${offset}`
+        `game=eq.${game}&select=id,name,number,set_id,set_name,rarity,finish_types,image_url,thumb_key,phash,phash_art&limit=${BATCH}&offset=${offset}`
       )
       if (!rows.length) break
 
-      const docs = rows.map(r => ({
-        id:           r.id,
-        game_id:      game,
-        name:         r.name,
-        number:       r.number   || '',
-        set_id:       r.set_id   || '',
-        set_name:     r.set_name || '',
-        rarity:       r.rarity   || '',
-        finish_types: r.finish_types || ['Normal'],
-        thumb_key:    r.thumb_key || '',
-        phash:        r.phash    || null,
-        hasPrice:     false,
-      }))
+      const docs = rows.map(r => {
+        const numInt = parseInt(r.number, 10)
+        return {
+          id:           r.id,
+          game_id:      game,
+          name:         r.name,
+          number:       r.number   || '',
+          numberInt:    Number.isFinite(numInt) && numInt > 0 ? numInt : null,
+          set_id:       r.set_id   || '',
+          set_name:     r.set_name || '',
+          rarity:       r.rarity   || '',
+          finish_types: r.finish_types || ['Normal'],
+          thumb_key:    r.thumb_key || '',
+          phash:        r.phash     || null,
+          phash_art:    r.phash_art || null,
+          hasPrice:     false,
+        }
+      })
 
       await indexCards(docs)
       offset += rows.length

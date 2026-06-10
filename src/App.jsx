@@ -73,6 +73,15 @@ const GAMES = [
       </svg>
     ),
   },
+  {
+    id: 'riftbound', label: 'Riftbound', emoji: '💎', color: '#2ecc71',
+    logo: (
+      <svg viewBox="0 0 24 24" width="26" height="26" fill="none">
+        <path d="M12 2l8 10-8 10L4 12Z" fill="currentColor" fillOpacity="0.22" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
+        <path d="M11 7l1.5 4-2 1.5 1.5 4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+      </svg>
+    ),
+  },
 ]
 
 const STRIPE_URL = 'https://buy.stripe.com/REPLACE_WITH_YOUR_STRIPE_LINK'
@@ -979,7 +988,7 @@ function ScanScreen({ user, profile, onScanDone, modelState, modelProgress }) {
               cursor: 'pointer',
             }}>
               <div style={{ height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                {!logoErrs[g.id] ? (
+                {!logoErrs[g.id] && GAME_LOGOS[g.id] ? (
                   <img
                     src={GAME_LOGOS[g.id]}
                     alt={g.label}
@@ -2258,7 +2267,7 @@ function CollectionScreen({ user, initialGame, onClearFilter }) {
             return (
               <button key={g.id} onClick={() => setFilterGame(g.id)} style={{ flexShrink: 0, padding: '8px 10px', borderRadius: 14, background: active ? g.color + '18' : COLORS.card, border: `1.5px solid ${active ? g.color : COLORS.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', minWidth: 58, boxShadow: active ? `0 0 14px ${g.color}28` : 'none', transition: 'all .15s', cursor: 'pointer' }}>
                 <div style={{ height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  {!logoErrs[g.id] ? (
+                  {!logoErrs[g.id] && GAME_LOGOS[g.id] ? (
                     <img src={GAME_LOGOS[g.id]} alt={g.label} onError={() => setLogoErrs(e => ({ ...e, [g.id]: true }))} style={{ height: 32, width: 'auto', maxWidth: 58, objectFit: 'contain', opacity: active ? 1 : 0.45, filter: active ? 'none' : 'grayscale(30%)', transition: 'opacity .15s, filter .15s' }} />
                   ) : (
                     <div style={{ color: active ? g.color : COLORS.muted }}>{React.cloneElement(g.logo, { width: 28, height: 28 })}</div>
@@ -2627,6 +2636,7 @@ const GAME_LOGOS = {
   onepiece:   '/logos/onepiece.png',
   dragonball: '/logos/dragonball.png',
   lorcana:    '/logos/lorcana.png',
+  riftbound:  '/logos/riftbound.png',
 }
 
 // SEARCH SCREEN
@@ -2777,7 +2787,7 @@ function SearchScreen({ onSelectGame, session }) {
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             {GAMES.map(game => (
               <button key={game.id} onClick={() => onSelectGame(game.id)} style={{ background: `radial-gradient(ellipse at 30% 30%, ${game.color}25 0%, #111 65%)`, border: `1px solid ${game.color}40`, borderRadius: 16, height: 110, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: '14px 12px' }}>
-                {!imgErrors[game.id] ? (
+                {!imgErrors[game.id] && GAME_LOGOS[game.id] ? (
                   <img
                     src={GAME_LOGOS[game.id]}
                     alt={game.label}
@@ -2785,7 +2795,9 @@ function SearchScreen({ onSelectGame, session }) {
                     style={{ height: 44, width: 'auto', maxWidth: 110, objectFit: 'contain' }}
                   />
                 ) : (
-                  <span style={{ fontSize: 34, lineHeight: 1 }}>{game.emoji}</span>
+                  <div style={{ color: game.color }}>
+                    {React.cloneElement(game.logo, { width: 52, height: 52 })}
+                  </div>
                 )}
               </button>
             ))}

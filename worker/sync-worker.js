@@ -1,5 +1,5 @@
 import { Worker } from 'bullmq'
-import { getRedis } from '../packages/cache/index.js'
+import { getBullRedis } from '../packages/cache/index.js'
 import { getProvider } from '../packages/providers/index.js'
 import { indexCards } from '../packages/search/index.js'
 import { dbInsert, dbUpsert, dbSelect } from '../server/middleware/db.js'
@@ -15,7 +15,7 @@ export function createSyncWorker() {
       await handleReindexGame(job)
     }
   }, {
-    connection: getRedis(),
+    connection: getBullRedis(),
     concurrency: 3,
     limiter: { max: 50, duration: 60000 },
   })
@@ -99,6 +99,32 @@ async function handleSyncSet(job) {
   }
   if (providerIdRows.length) {
     await dbUpsert('card_provider_ids', providerIdRows, 'catalog_id,provider').catch(() => null)
+  }
+
+  const priceRows = []
+  for (const c of cards) {
+    if (!c.prices) continue
+    const catalogId = buildCatalogId(gameId, externalSetId, c.number)
+    for (const [finish, p] of Object.entries(c.prices)) {
+      if (!p) continue
+      const priceValue = p.avg7 || p.sell || p.trend || null
+      if (!priceValue) continue
+      priceRows.push({
+        catalog_id:  catalogId,
+        finish,
+        price_avg7:  p.avg7  || null,
+        price_avg30: p.avg30 || null,
+        price_low:   p.low   || null,
+        price_sell:  p.sell  || null,
+        price_trend: p.trend || null,
+        cm_url:      p.cmUrl || null,
+        fetched_at:  new Date().toISOString(),
+      })
+    }
+  }
+  if (priceRows.length) {
+    await dbUpsert('card_prices', priceRows, 'catalog_id,finish').catch(err => job.log(`Price upsert error: ${err.message}`))
+    job.log(`Saved ${priceRows.length} price rows`)
   }
 
   await indexCards(catalogRows)

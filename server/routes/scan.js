@@ -86,6 +86,7 @@ export async function scanRoutes(fastify) {
       price_sell:     priceRow.price_sell  || null,
       cardmarket_url: priceRow.cm_url      || card.cardmarket_url || null,
       image_url:      card.image_url       || null,
+      rarity:         card.rarity          || null,
     }
 
     const [created] = await dbInsert('cards', userCard)

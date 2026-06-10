@@ -15,3 +15,17 @@ dist
 # Accidental screenshots
 public/logos/Screenshot_*.jpg
 public/logos/Screenshot_*.png
+
+# Local Meilisearch installation
+meilisearch.exe
+meili_data/
+meilisearch_data/
+
+# Tesseract model (installeres separat)
+*.traineddata
+
+# Debug artifacts
+num_zone_debug.png
+
+# Backfill progress tracking
+scripts/.progress-*.txt

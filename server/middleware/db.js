@@ -18,13 +18,10 @@ export async function dbSelect(table, params = '') {
   return r.json()
 }
 
-export async function dbInsert(table, body, { upsert = false, onConflict = '' } = {}) {
-  const prefer = upsert
-    ? `resolution=merge-duplicates${onConflict ? `,merge-duplicates-on=${onConflict}` : ''}`
-    : 'return=representation'
+export async function dbInsert(table, body) {
   const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
     method: 'POST',
-    headers: headers({ Prefer: prefer }),
+    headers: headers({ Prefer: 'return=representation' }),
     body: JSON.stringify(body)
   })
   if (!r.ok) {
@@ -35,7 +32,17 @@ export async function dbInsert(table, body, { upsert = false, onConflict = '' } 
 }
 
 export async function dbUpsert(table, body, onConflict) {
-  return dbInsert(table, body, { upsert: true, onConflict })
+  const qs = onConflict ? `?on_conflict=${encodeURIComponent(onConflict)}` : ''
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}${qs}`, {
+    method: 'POST',
+    headers: headers({ Prefer: 'resolution=merge-duplicates,return=representation' }),
+    body: JSON.stringify(body)
+  })
+  if (!r.ok) {
+    const err = await r.text()
+    throw new Error(`DB upsert failed: ${r.status} ${err}`)
+  }
+  return r.json()
 }
 
 export async function dbUpdate(table, match, body) {

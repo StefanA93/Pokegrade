@@ -26,7 +26,7 @@ function hammingDistance(a, b) {
   return dist
 }
 
-const VALID_GAMES = ['pokemon', 'pokemonjp', 'mtg', 'yugioh', 'onepiece', 'lorcana', 'dragonball']
+const VALID_GAMES = ['pokemon', 'pokemonjp', 'mtg', 'yugioh', 'onepiece', 'lorcana', 'dragonball', 'riftbound']
 
 export default async function handler(req) {
   if (req.method === 'OPTIONS') return new Response(null, { headers: CORS })

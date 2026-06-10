@@ -22,41 +22,37 @@ import { scanCard } from '../packages/scanner/index.js'
 import { dbSelect } from '../server/middleware/db.js'
 
 // ─── Testkorpus: [katalogId, eksakt-navn, sæt, beskrivelse] ─────────────────
+// IDs matcher tcgapi-import-format (pokemon-{tcgapiId})
 const TEST_CARDS = [
-  ['pokemon-sv4pt5-54',     'Charizard ex',              'Paldean Fates',          'populær ex'],
-  ['pokemon-sv4pt5-234',    'Charizard ex',              'Paldean Fates',          'SIR variant'],
-  ['pokemon-sv3pt5-36',     'Pikachu ex',                '151',                    'ikonisk ex'],
-  ['pokemon-sv1-198',       'Miraidon ex',               'Scarlet & Violet',       'launch-kort'],
-  ['pokemon-sv1-182',       'Koraidon ex',               'Scarlet & Violet',       'launch-kort'],
-  ['pokemon-sv2-182',       'Gardevoir ex',              'Paldea Evolved',         'tier-1'],
-  ['pokemon-sv3-185',       'Iono',                      'Obsidian Flames',        'Trainer'],
-  ['pokemon-base1-4',       'Charizard',                 'Base Set',               'klassiker holo'],
-  ['pokemon-base1-15',      'Venusaur',                  'Base Set',               'klassiker holo'],
-  ['pokemon-base1-6',       'Gyarados',                  'Base Set',               'holo rare'],
-  ['pokemon-base1-16',      'Zapdos',                    'Base Set',               'holo rare'],
-  ['pokemon-sv4-199',       'Iron Thorns ex',            'Paradox Rift',           'dobbeltord ex'],
-  ['pokemon-sv4-245',       'Sandy Shocks ex',           'Paradox Rift',           'dobbeltord ex'],
-  ['pokemon-sv3-198',       'Tyranitar ex',              'Obsidian Flames',        'ex'],
-  ['pokemon-swsh12pt5-160', 'Lugia V',                   'Crown Zenith',           'V-kort'],
-  ['pokemon-swsh12-183',    'Arceus VSTAR',              'Brilliant Stars',        'VSTAR'],
-  ['pokemon-swsh12-186',    'Charizard VSTAR',           'Brilliant Stars',        'VSTAR'],
-  ['pokemon-swsh10-154',    'Giratina VSTAR',            'Lost Origin',            'VSTAR'],
-  ['pokemon-swsh4-186',     'Rayquaza VMAX',             'Evolving Skies',         'VMAX'],
-  ['pokemon-sv5-180',       'Ogerpon ex',                'Twilight Masquerade',    'ny ex'],
-  ['pokemon-sv1-186',       'Arven',                     'Scarlet & Violet',       'Trainer'],
+  ['pokemon-17173', 'Miraidon ex',    'Paldean Fates',   'modern ex'],
+  ['pokemon-20516', 'Koraidon ex',    'Obsidian Flames', 'modern ex'],
+  ['pokemon-15554', 'Pikachu ex',     'Paldea Evolved',  'popular ex'],
+  ['pokemon-5786',  'Gardevoir ex',   'Prize Pack',      'tier-1 ex'],
+  ['pokemon-20441', 'Tyranitar ex',   'Obsidian Flames', 'ex'],
+  ['pokemon-13185', 'Iron Thorns ex', 'Prismatic Evol.', 'dobbeltord ex'],
+  ['pokemon-22925', 'Arceus VSTAR',   'Brilliant Stars', 'VSTAR'],
+  ['pokemon-22939', 'Charizard VSTAR','Brilliant Stars', 'VSTAR'],
+  ['pokemon-19073', 'Giratina VSTAR', 'Lost Origin',     'VSTAR'],
+  ['pokemon-17655', 'Rayquaza VMAX',  'Evolving Skies',  'VMAX'],
+  ['pokemon-38295', 'Charizard',      'Celebrations',    'klassiker holo reprint'],
+  ['pokemon-38276', 'Venusaur',       'Celebrations',    'klassiker holo reprint'],
+  ['pokemon-26318', 'Zapdos',         'XY Evolutions',   'klassiker reprint'],
+  ['pokemon-20406', 'Arven',          'Obsidian Flames', 'Trainer SV'],
+  ['pokemon-5485',  'Iono',           'Prize Pack',      'Trainer'],
+  ['pokemon-21437', 'Lugia V',        'Silver Tempest',  'V-kort'],
 ]
 
 // Fuzzy-navne der simulerer typiske OCR-fejl
 const FUZZY_TESTS = [
-  { query: 'charizard ex',         expectName: 'Charizard ex'  },
-  { query: 'Chariizard ex',        expectName: 'Charizard ex'  },  // dobbelttegn
-  { query: 'pikach ex',            expectName: 'Pikachu ex'    },  // afkortet
-  { query: 'Venusaur 100 HP',      expectName: 'Venusaur'      },  // HP-støj
-  { query: 'Zapdos 90 HP',         expectName: 'Zapdos'        },  // HP-støj
-  { query: 'Girateen VSTAR',       expectName: 'Giratina VSTAR' }, // udtale-fejl
-  { query: 'Iron Thorns',          expectName: 'Iron Thorns ex' }, // mangler ex
-  { query: 'iono',                 expectName: 'Iono'           }, // lowercase
-  { query: 'arven trainer',        expectName: 'Arven'          }, // ekstra ord
+  { query: 'charizard vstar',    expectName: 'Charizard VSTAR' },
+  { query: 'Chariizard vstar',   expectName: 'Charizard VSTAR' },  // dobbelttegn
+  { query: 'miraidon ex',        expectName: 'Miraidon ex'     },
+  { query: 'pikach ex',          expectName: 'Pikachu ex'      },  // afkortet
+  { query: 'Venusaur 100 HP',    expectName: 'Venusaur'        },  // HP-støj
+  { query: 'Girateen VSTAR',     expectName: 'Giratina VSTAR'  },  // udtale-fejl
+  { query: 'Iron Thorns',        expectName: 'Iron Thorns ex'  },  // mangler ex
+  { query: 'iono',               expectName: 'Iono'            },  // lowercase
+  { query: 'arven trainer',      expectName: 'Arven'           },  // ekstra ord
 ]
 
 const CONCURRENCY   = 3
@@ -146,8 +142,8 @@ async function testOCRAndPipeline(catalogCards) {
   console.log('\n━━━ TEST 2+3: OCR-præcision + Fuld pipeline (officielle billeder) ━━━')
   console.log('  Officielle renders bruges som bedste-tilfælde proxy for rigtige fotos.\n')
   console.log(
-    pad('Kort', 24), pad('OCR læste', 26), pad('Conf', 6),
-    pad('OCR✓', 5), pad('Top1', 5), 'Auto'
+    pad('Kort', 24), pad('OCR læste', 21), pad('Num', 6),
+    pad('Conf', 6), pad('OCR✓', 5), pad('Top1', 5), 'Met  Auto'
   )
   console.log('─'.repeat(80))
 
@@ -178,6 +174,8 @@ async function testOCRAndPipeline(catalogCards) {
 
         return {
           catalogId, name, ocrText, ocrConf, ocrOk,
+          cardNum:  scan.cardNum || '',
+          method:   scan.method  || 'name+phash',
           top1: allCands[0]?.id === catalogId,
           top3: rank >= 1 && rank <= 3,
           autoOk: scan.autoMatched && scan.match?.id === catalogId,
@@ -200,12 +198,15 @@ async function testOCRAndPipeline(catalogCards) {
       if (r.autoOk) autoMatch++
 
       const confStr = `${(r.ocrConf * 100).toFixed(0)}%`
+      const methodStr = r.method === 'number+phash' ? '🔢' : r.method === 'embedding+phash' ? '🧠' : '📝'
       console.log(
         pad(r.name.slice(0, 23), 24),
-        pad((r.ocrText || '—').slice(0, 25), 26),
+        pad((r.ocrText || '—').slice(0, 20), 21),
+        pad(r.cardNum || '—', 6),
         pad(confStr, 6),
         pad(r.ocrOk ? '✅' : '✗', 5),
         pad(r.top1 ? '✅' : r.top3 ? '#≤3' : '✗', 5),
+        methodStr,
         r.autoOk ? '🎯' : ''
       )
     }

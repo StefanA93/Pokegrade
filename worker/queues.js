@@ -1,7 +1,7 @@
 import { Queue } from 'bullmq'
-import { getRedis } from '../packages/cache/index.js'
+import { getBullRedis } from '../packages/cache/index.js'
 
-const connection = getRedis()
+const connection = getBullRedis()
 
 export const syncQueue  = new Queue('sync',   { connection })
 export const priceQueue = new Queue('prices', { connection })

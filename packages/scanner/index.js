@@ -1,9 +1,11 @@
 import sharp from 'sharp'
-import { extractCardName } from './ocr.js'
-import { computePhash, phashSimilarity } from './phash.js'
+import { extractCardName, extractCardNumber } from './ocr.js'
+import { computePhash, computeArtworkPhash, phashSimilarity } from './phash.js'
+import { searchByEmbedding } from '../search/index.js'
 
-export { computePhash, hammingDistance, phashSimilarity } from './phash.js'
-export { extractCardName, cleanup as cleanupOCR } from './ocr.js'
+export { computePhash, computeArtworkPhash, hammingDistance, phashSimilarity } from './phash.js'
+export { extractCardName, extractCardNumber, cleanup as cleanupOCR } from './ocr.js'
+export { extractEmbedding, isEmbeddingAvailable } from './embedding-server.js'
 
 export async function normalizeImage(imageBuffer, targetWidth = 800) {
   return sharp(imageBuffer)
@@ -24,45 +26,120 @@ export async function toWebp(imageBuffer, quality = 85) {
     .toBuffer()
 }
 
-export async function scanCard(imageBuffer, { game = null, searchFn } = {}) {
-  const normalized = await normalizeImage(imageBuffer)
+function scoreByPhash(candidate, fullPhash, artPhash) {
+  const artScore  = candidate.phashArt ? phashSimilarity(artPhash, candidate.phashArt)  : 0
+  const fullScore = candidate.phash    ? phashSimilarity(fullPhash, candidate.phash)    : 0
+  if (artScore > 0 && fullScore > 0) return artScore * 0.65 + fullScore * 0.35
+  if (artScore > 0) return artScore
+  if (fullScore > 0) return fullScore
+  return 0.5
+}
 
-  // Kør OCR og phash parallelt — nummer-OCR undlades (upålidelig på moderne kort)
-  const [ocrResult, uploadedPhash] = await Promise.all([
-    extractCardName(normalized, game || 'pokemon'),
+export async function scanCard(imageBuffer, { game = null, searchFn, embeddingFn } = {}) {
+  const normalized = await normalizeImage(imageBuffer)
+  const g          = game || 'pokemon'
+
+  // ── Parallelle signaler ───────────────────────────────────────────────────
+  const [ocrResult, cardNum, fullPhash, artPhash] = await Promise.all([
+    extractCardName(normalized, g),
+    extractCardNumber(normalized, g),
     computePhash(normalized),
+    computeArtworkPhash(normalized, g),
   ])
 
   const { text: ocrText, confidence: ocrConfidence } = ocrResult
 
-  // Phash-prioriteret sti: selv når OCR fejler kan phash identificere kortet
-  // Floor på 0.3 sikrer at phash-signalet stadig tæller selv ved dårlig OCR
-  const effectiveOcrWeight = Math.max(ocrConfidence, 0.3)
+  // ── Vej 1: Kortnummer (hurtigste, mest præcis) ────────────────────────────
+  // extractCardNumber returnerer kun reliable numre (NNN/NNN mønster).
+  // Filter på numberInt → kun ~20-40 kandidater → phash artwork disambiguerer sæt.
+  // Returnerer KUN hvis phash-confidence er høj (≥ 0.75) for at undgå falske positiver.
+  if (cardNum && searchFn) {
+    const numInt = parseInt(cardNum, 10)
+    if (Number.isFinite(numInt) && numInt > 0) {
+      const numCandidates = await searchFn('', { gameId: g, numberInt: numInt, limit: 40 })
 
-  if (!ocrText || ocrText.length < 2) {
-    return { candidates: [], confidence: 0, ocrText: '', autoMatched: false }
+      if (numCandidates.length > 0) {
+        const ranked = numCandidates.map(c => ({
+          ...c,
+          _pHashScore:    scoreByPhash(c, fullPhash, artPhash),
+          _combinedScore: scoreByPhash(c, fullPhash, artPhash),
+        })).sort((a, b) => b._combinedScore - a._combinedScore)
+
+        const best = ranked[0]
+        // Høj tærskel: phash skal være meget sikker når nummer alene disambiguerer
+        if (best._combinedScore >= 0.75) {
+          return {
+            match:       best,
+            candidates:  ranked.slice(0, 5),
+            confidence:  best._combinedScore,
+            ocrText,
+            cardNum,
+            method:      'number+phash',
+            autoMatched: best._combinedScore >= 0.82,
+          }
+        }
+      }
+    }
   }
 
+  // ── Vej 2: CLIP embedding (visuelt fingeraftryk, sæt-uafhængigt) ──────────
+  // 512-dim cosine similarity over hele kataloget via pgvector.
+  // Kombineres med artwork-phash for final disambiguering.
+  const ef = embeddingFn || (typeof extractEmbeddingLazy !== 'undefined' ? extractEmbeddingLazy : null)
+  if (ef) {
+    try {
+      const embedding       = await ef(normalized)
+      const embCandidates   = await searchByEmbedding(embedding, g, 15, 0.60)
+
+      if (embCandidates.length > 0) {
+        const ranked = embCandidates.map(c => {
+          const pHash    = scoreByPhash(c, fullPhash, artPhash)
+          const embScore = typeof c.similarity === 'number' ? c.similarity : 0.7
+          const combined = embScore * 0.65 + pHash * 0.35
+          return { ...c, _pHashScore: pHash, _combinedScore: combined }
+        }).sort((a, b) => b._combinedScore - a._combinedScore)
+
+        const best = ranked[0]
+        if (best._combinedScore > 0.65) {
+          return {
+            match:       best,
+            candidates:  ranked.slice(0, 5),
+            confidence:  best._combinedScore,
+            ocrText,
+            cardNum,
+            method:      'embedding+phash',
+            autoMatched: best._combinedScore > 0.72,
+          }
+        }
+      }
+    } catch {
+      // Embedding-fejl er ikke fatale — fortsæt til navnesøgning
+    }
+  }
+
+  // ── Vej 3: Navnesøgning (fallback) ────────────────────────────────────────
+  if (!ocrText || ocrText.length < 2) {
+    return { candidates: [], confidence: 0, ocrText: '', cardNum, method: 'none', autoMatched: false }
+  }
+
+  const effectiveOcrWeight = Math.max(ocrConfidence, 0.3)
   const rawCandidates = searchFn
-    ? await searchFn(ocrText, { gameId: game, limit: 10 })
+    ? await searchFn(ocrText, { gameId: g, limit: 10 })
     : []
 
-  // Rangér: phash er primær disambiguation-signal, søgescore er sekundær
   const ranked = rawCandidates.map(c => {
-    const pHashScore    = c.phash ? phashSimilarity(uploadedPhash, c.phash) : 0.5
-    const searchScore   = c._searchScore ?? 0.7
-    // Phash vægtes tungere (60%) end før — specielt vigtigt for moderne kort
-    const combinedScore = effectiveOcrWeight * searchScore * (0.35 + pHashScore * 0.65)
-    return { ...c, _pHashScore: pHashScore, _combinedScore: combinedScore }
+    const pHash       = scoreByPhash(c, fullPhash, artPhash)
+    const searchScore = c._searchScore ?? 0.7
+    const combined    = effectiveOcrWeight * searchScore * (0.35 + pHash * 0.65)
+    return { ...c, _pHashScore: pHash, _combinedScore: combined }
   }).sort((a, b) => b._combinedScore - a._combinedScore)
 
   const best       = ranked[0]
   const confidence = best?._combinedScore ?? 0
 
-  // Tærskel sænket til 0.60 — phash giver tilstrækkeligt signal selv med svag OCR
   if (confidence > 0.60 && ranked.length > 0) {
-    return { match: best, candidates: ranked.slice(0, 3), confidence, ocrText, autoMatched: true }
+    return { match: best, candidates: ranked.slice(0, 3), confidence, ocrText, cardNum, method: 'name+phash', autoMatched: true }
   }
 
-  return { candidates: ranked.slice(0, 5), confidence, ocrText, autoMatched: false }
+  return { candidates: ranked.slice(0, 5), confidence, ocrText, cardNum, method: 'name+phash', autoMatched: false }
 }

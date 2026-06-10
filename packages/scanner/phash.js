@@ -24,6 +24,30 @@ export async function computePhash(imageBuffer) {
   return hex
 }
 
+function artworkZone(width, height, game) {
+  const mx = Math.floor(width * 0.08)
+  const iw = width - mx * 2
+  switch (game) {
+    case 'yugioh':
+      return { left: mx, top: Math.floor(height * 0.12), width: iw, height: Math.floor(height * 0.44) }
+    case 'mtg':
+      return { left: mx, top: Math.floor(height * 0.13), width: iw, height: Math.floor(height * 0.37) }
+    case 'lorcana':
+      return { left: mx, top: Math.floor(height * 0.08), width: iw, height: Math.floor(height * 0.42) }
+    case 'onepiece':
+      return { left: mx, top: Math.floor(height * 0.08), width: iw, height: Math.floor(height * 0.46) }
+    default:
+      return { left: mx, top: Math.floor(height * 0.14), width: iw, height: Math.floor(height * 0.52) }
+  }
+}
+
+export async function computeArtworkPhash(imageBuffer, game = 'pokemon') {
+  const meta = await sharp(imageBuffer).metadata()
+  const zone = artworkZone(meta.width, meta.height, game)
+  const cropped = await sharp(imageBuffer).extract(zone).toBuffer()
+  return computePhash(cropped)
+}
+
 export function hammingDistance(hashA, hashB) {
   if (!hashA || !hashB || hashA.length !== hashB.length) return Infinity
   let dist = 0
