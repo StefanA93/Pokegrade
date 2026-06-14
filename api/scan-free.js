@@ -1,22 +1,24 @@
 /**
  * Free Scan — Node.js runtime.
- * 3-signal pipeline (høj til lav præcision):
- *   1. CLIP embedding  → pgvector cosine similarity (primær, semantisk robust)
- *   2. phash           → Hamming distance (visuelt pre-filter + fallback)
- *   3. Kortnummer OCR  → additive bonus når nummer matcher
+ * Pipeline (parallel execution):
+ *   1. OCR kortnummer  → direkte DB-opslag (primær, 100% præcis når læst)
+ *   2. CLIP embedding  → pgvector cosine similarity (fallback ved OCR-fejl)
+ *   3. phash           → rarity-disambiguation og tiebreaker
  *
- * CLIP er robust overfor kamera-støj, vinkler og belysning.
- * phash bruges som tiebreaker og fallback når embedding endnu ikke er backfillet.
+ * VIGTIG: OCR og CLIP køres parallelt — total latency = max(ocr, clip).
+ *
+ * Per-spil logik:
+ *   Pokemon/MTG/Lorcana : number+setTotal → enkelt kort
+ *   YGO/DBS/OnePiece    : alfanumerisk kode → 1-10 rarity-varianter → CLIP+phash vælger
  */
 
 import sharp     from 'sharp'
 import Tesseract from 'tesseract.js'
-import { MeiliSearch } from 'meilisearch'
 
-const SUPABASE_URL = process.env.SUPABASE_URL
-const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY
-const MEILI_URL    = process.env.MEILISEARCH_URL || 'http://localhost:7700'
-const MEILI_KEY    = process.env.MEILISEARCH_KEY || ''
+const SUPABASE_URL  = process.env.SUPABASE_URL
+const SUPABASE_KEY  = process.env.SUPABASE_SERVICE_KEY
+const EMBED_URL     = process.env.EMBED_SERVICE_URL   // Railway: https://xxx.up.railway.app
+const EMBED_SECRET  = process.env.EMBED_SECRET        // Delt hemmelighed
 
 const CORS = {
   'Access-Control-Allow-Origin':  '*',
@@ -26,34 +28,33 @@ const CORS = {
 
 const VALID_GAMES = ['pokemon', 'pokemonjp', 'mtg', 'yugioh', 'onepiece', 'lorcana', 'dragonball', 'riftbound']
 
-// ─── phash (fallback) ──────────────────────────────────────────────────────
-async function computePhash(buf) {
-  const SIZE = 8
-  const px = await sharp(buf).resize(SIZE + 1, SIZE, { fit: 'fill' }).grayscale().raw().toBuffer()
-  let bits = ''
-  for (let r = 0; r < SIZE; r++)
-    for (let c = 0; c < SIZE; c++)
-      bits += px[r * (SIZE + 1) + c] < px[r * (SIZE + 1) + c + 1] ? '1' : '0'
-  let hex = ''
-  for (let i = 0; i < bits.length; i += 4) hex += parseInt(bits.slice(i, i + 4), 2).toString(16)
-  return hex
-}
-
+// ─── Helpers ──────────────────────────────────────────────────────────────
 function hammingDist(a, b) {
   if (!a || !b || a.length !== b.length) return Infinity
   let d = 0
-  for (let i = 0; i < a.length; i++) { let x = parseInt(a[i], 16) ^ parseInt(b[i], 16); while (x) { d += x & 1; x >>= 1 } }
+  for (let i = 0; i < a.length; i++) {
+    let x = parseInt(a[i], 16) ^ parseInt(b[i], 16)
+    while (x) { d += x & 1; x >>= 1 }
+  }
   return d
 }
 
-function cosine(a, b) {
-  if (!a || !b || a.length !== b.length) return 0
-  let dot = 0, na = 0, nb = 0
-  for (let i = 0; i < a.length; i++) { dot += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i] }
-  return na && nb ? dot / (Math.sqrt(na) * Math.sqrt(nb)) : 0
+// ─── phash ────────────────────────────────────────────────────────────────
+async function computePhash(buf) {
+  const SIZE = 8
+  try {
+    const px = await sharp(buf).resize(SIZE + 1, SIZE, { fit: 'fill' }).grayscale().raw().toBuffer()
+    let bits = ''
+    for (let r = 0; r < SIZE; r++)
+      for (let c = 0; c < SIZE; c++)
+        bits += px[r * (SIZE + 1) + c] < px[r * (SIZE + 1) + c + 1] ? '1' : '0'
+    let hex = ''
+    for (let i = 0; i < bits.length; i += 4) hex += parseInt(bits.slice(i, i + 4), 2).toString(16)
+    return hex
+  } catch { return null }
 }
 
-// ─── Kortnummer OCR ────────────────────────────────────────────────────────
+// ─── OCR ──────────────────────────────────────────────────────────────────
 let _ocrWorker = null
 
 async function getOcrWorker() {
@@ -66,30 +67,98 @@ async function getOcrWorker() {
   return _ocrWorker
 }
 
-async function ocrCardNumber(imgBuf) {
-  const { width, height } = await sharp(imgBuf).metadata()
-  const zone = { left: Math.floor(width * 0.08), top: Math.floor(height * 0.865), width: Math.floor(width * 0.84), height: Math.floor(height * 0.075) }
-  const crop = await sharp(imgBuf).extract(zone).resize({ width: 700 }).grayscale().normalize().sharpen({ sigma: 1.2 }).toBuffer()
+function parseOcrText(raw, game) {
+  // Yu-Gi-Oh / Dragon Ball / One Piece: alfanumerisk kode  f.eks. BLVO-EN042, BT1-001, OP01-001
+  const code = raw.match(/([A-Z]{1,6}\d{0,3}-[A-Z]{0,2}\d{2,4})/)
+  if (code) return { number: code[1], setTotal: null, isCode: true }
+
+  // Pokemon / MTG / Lorcana: numerisk format  f.eks. 123/165
+  const slash = raw.match(/(\d{1,4})\/(\d{1,4})/)
+  if (slash) return {
+    number:   slash[1].replace(/^0+(?=\d)/, '') || '0',
+    setTotal: parseInt(slash[2], 10),
+    isCode:   false,
+  }
+
+  // Fallback: nøgent tal
+  const num = raw.match(/\b(\d{1,4})\b/)
+  if (num) return {
+    number:   num[1].replace(/^0+(?=\d)/, '') || '0',
+    setTotal: null,
+    isCode:   false,
+  }
+
+  return { number: null, setTotal: null, isCode: false }
+}
+
+// OCR-zone: bundlinjen af kortet (ca. 7.5 % af kortets højde)
+// Samme zone dækker alle spil — koden/nummeret sidder altid i bunden
+async function ocrCardNumber(imgBuf, game) {
+  let ocrTarget = imgBuf
+  try {
+    const { width, height } = await sharp(imgBuf).metadata()
+    const zone = {
+      left:   Math.floor(width  * 0.05),
+      top:    Math.floor(height * 0.860),
+      width:  Math.floor(width  * 0.90),
+      height: Math.floor(height * 0.080),
+    }
+    ocrTarget = await sharp(imgBuf)
+      .extract(zone)
+      .resize({ width: 800 })
+      .grayscale()
+      .normalize()
+      .sharpen({ sigma: 1.5 })
+      .toBuffer()
+  } catch { /* sharp fejlede → OCR på fuldt billede */ }
+
   const w = await getOcrWorker()
-  const { data } = await w.recognize(crop)
+  const { data } = await w.recognize(ocrTarget)
   const raw = data.text.replace(/\s+/g, '').toUpperCase()
-  const slash = raw.match(/^(\d{1,4})\/(\d{1,4})$/)
-  if (slash) return slash[1].replace(/^0+(?=\d)/, '') || '0'
-  const num = raw.match(/^(\d{1,4})$/)
-  if (num) return num[1].replace(/^0+(?=\d)/, '') || '0'
-  return null
+  return parseOcrText(raw, game)
+}
+
+// ─── Railway embedding service ────────────────────────────────────────────
+async function getServerEmbedding(base64Image) {
+  if (!EMBED_URL) return null
+  try {
+    const r = await fetch(`${EMBED_URL}/embed`, {
+      method:  'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(EMBED_SECRET ? { Authorization: `Bearer ${EMBED_SECRET}` } : {}),
+      },
+      body:   JSON.stringify({ image: `data:image/jpeg;base64,${base64Image}` }),
+      signal: AbortSignal.timeout(8000),
+    })
+    if (!r.ok) return null
+    const { embedding } = await r.json()
+    return Array.isArray(embedding) && embedding.length === 512 ? embedding : null
+  } catch { return null }
 }
 
 // ─── Supabase ─────────────────────────────────────────────────────────────
 const sbh = () => ({ apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json' })
 
-async function clipSearch(embedding, game, count = 20) {
+// Per-spil CLIP-pool størrelse
+const CLIP_MATCH_COUNT = { pokemon: 30, pokemonjp: 30, dragonball: 40, yugioh: 40, default: 25 }
+
+// YGO: ren CLIP — phash er ens for alle rarities (samme artwork)
+// DBS: lav phash-vægt — rarities kan dele artwork
+// Resten: CLIP + phash
+const PHASH_SCORE_WEIGHTS = {
+  yugioh:     { clip: 1.00, phash: 0.00 },
+  dragonball: { clip: 0.80, phash: 0.20 },
+  default:    { clip: 0.65, phash: 0.25 },
+}
+
+async function clipSearch(embedding, game, count) {
   const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/match_cards`, {
     method:  'POST',
     headers: sbh(),
     body:    JSON.stringify({ query_embedding: `[${embedding.join(',')}]`, game_filter: game, match_count: count }),
   })
-  if (!r.ok) return null   // pgvector endnu ikke sat op → faldt tilbage til phash
+  if (!r.ok) return null
   return r.json()
 }
 
@@ -97,7 +166,10 @@ async function phashSearch(game, uploadedHash) {
   const all = []
   let offset = 0
   while (true) {
-    const r = await fetch(`${SUPABASE_URL}/rest/v1/card_catalog?game=eq.${game}&phash=not.is.null&select=id,phash&limit=1000&offset=${offset}`, { headers: sbh() })
+    const r = await fetch(
+      `${SUPABASE_URL}/rest/v1/card_catalog?game=eq.${game}&phash=not.is.null&select=id,phash&limit=1000&offset=${offset}`,
+      { headers: sbh() }
+    )
     if (!r.ok) break
     const batch = await r.json()
     all.push(...batch)
@@ -112,20 +184,71 @@ async function phashSearch(game, uploadedHash) {
 
 async function fetchDetails(ids) {
   if (!ids.length) return []
-  const r = await fetch(`${SUPABASE_URL}/rest/v1/card_catalog?id=in.(${ids.map(id => `"${id}"`).join(',')})&select=id,name,number,set_id,set_name,rarity,finish_types,image_url,game`, { headers: sbh() })
+  const r = await fetch(
+    `${SUPABASE_URL}/rest/v1/card_catalog?id=in.(${ids.map(id => `"${id}"`).join(',')})&select=id,name,number,set_id,set_name,rarity,finish_types,image_url,game`,
+    { headers: sbh() }
+  )
   return r.ok ? r.json() : []
 }
 
-async function fetchByNumber(game, num) {
-  if (!num) return new Set()
-  const r = await fetch(`${SUPABASE_URL}/rest/v1/card_catalog?game=eq.${game}&number=eq.${encodeURIComponent(num)}&select=id&limit=30`, { headers: sbh() })
+async function fetchByNumber(game, num, setTotal, isCode) {
+  if (!num) return { exact: new Set(), numberOnly: new Set() }
+
+  if (isCode) {
+    // Alfanumerisk kode (YGO/DBS/OnePiece): præcis kode-match
+    // ≤10 = rarity-varianter af samme kort → exact; >10 = for bredt → numberOnly
+    const r = await fetch(
+      `${SUPABASE_URL}/rest/v1/card_catalog?game=eq.${game}&number=eq.${encodeURIComponent(num)}&select=id&limit=15`,
+      { headers: sbh() }
+    )
+    const rows = r.ok ? await r.json() : []
+    if (rows.length >= 1 && rows.length <= 10) return { exact: new Set(rows.map(c => c.id)), numberOnly: new Set() }
+    if (rows.length > 10)                      return { exact: new Set(),                    numberOnly: new Set(rows.map(c => c.id)) }
+    return { exact: new Set(), numberOnly: new Set() }
+  }
+
+  if (setTotal) {
+    // Pokemon/MTG/Lorcana: number + sætstørrelse identificerer sættet præcist
+    const rpc = await fetch(`${SUPABASE_URL}/rest/v1/rpc/match_cards_number_setsize`, {
+      method:  'POST',
+      headers: sbh(),
+      body:    JSON.stringify({ p_game: game, p_number: num, p_set_total: setTotal }),
+    })
+    const exactRows = rpc.ok ? await rpc.json() : []
+    if (exactRows.length > 0) return { exact: new Set(exactRows.map(c => c.id)), numberOnly: new Set() }
+  }
+
+  // Nummer-only fallback (mange kort deler nummer på tværs af sæt)
+  const r = await fetch(
+    `${SUPABASE_URL}/rest/v1/card_catalog?game=eq.${game}&number=eq.${encodeURIComponent(num)}&select=id&limit=30`,
+    { headers: sbh() }
+  )
   const rows = r.ok ? await r.json() : []
-  return new Set(rows.map(c => c.id))
+  return { exact: new Set(), numberOnly: new Set(rows.map(c => c.id)) }
+}
+
+function toCandidate(card, similarity) {
+  return {
+    id:           card.id,
+    name:         card.name         || null,
+    number:       card.number       || null,
+    set_id:       card.set_id       || null,
+    set_name:     card.set_name     || null,
+    rarity:       card.rarity       || null,
+    finish_types: card.finish_types || ['Normal'],
+    image_url:    card.image_url    || null,
+    game:         card.game,
+    similarity:   parseFloat(similarity.toFixed(4)),
+    _clip:        0,
+  }
 }
 
 // ─── Handler ───────────────────────────────────────────────────────────────
 export default async function handler(req, res) {
-  if (req.method === 'OPTIONS') { Object.entries(CORS).forEach(([k, v]) => res.setHeader(k, v)); return res.status(200).end() }
+  if (req.method === 'OPTIONS') {
+    Object.entries(CORS).forEach(([k, v]) => res.setHeader(k, v))
+    return res.status(200).end()
+  }
   Object.entries(CORS).forEach(([k, v]) => res.setHeader(k, v))
   res.setHeader('Content-Type', 'application/json')
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
@@ -137,72 +260,159 @@ export default async function handler(req, res) {
     })
   } catch { return res.status(400).json({ error: 'Invalid JSON' }) }
 
-  const { image, game, embedding: clientEmbedding } = body
+  const { image, game, embedding: clientEmbedding, clientPhash: incomingPhash } = body
   if (!image) return res.status(400).json({ error: 'image required (base64 dataURL)' })
 
   const safeGame = VALID_GAMES.includes(game) ? game : 'pokemon'
   const base64   = image.replace(/^data:image\/\w+;base64,/, '')
   const imgBuf   = Buffer.from(base64, 'base64')
 
-  const normalizedBuf = await sharp(imgBuf).resize(900, null, { withoutEnlargement: true }).jpeg({ quality: 90 }).toBuffer()
+  let normalizedBuf
+  try {
+    normalizedBuf = await sharp(imgBuf).resize(900).jpeg({ quality: 90 }).toBuffer()
+  } catch { normalizedBuf = imgBuf }
 
-  // ── Signal 1: CLIP (primær) ────────────────────────────────────────────
-  let clipResults   = null
-  let usedClip      = false
+  const matchCount = CLIP_MATCH_COUNT[safeGame] ?? CLIP_MATCH_COUNT.default
 
-  if (clientEmbedding && Array.isArray(clientEmbedding) && clientEmbedding.length === 512) {
-    clipResults = await clipSearch(clientEmbedding, safeGame, 20)
-    if (clipResults && clipResults.length > 0) usedClip = true
-  }
-
-  // ── Signal 2: phash (fallback / tiebreaker) ────────────────────────────
-  const [uploadedPhash, phashResults] = await Promise.all([
-    computePhash(normalizedBuf),
-    usedClip ? Promise.resolve([]) : phashSearch(safeGame, await computePhash(normalizedBuf)),
+  // ── Parallel: Railway embedding + OCR kører samtidigt ────────────────────
+  // Prioritet: Railway (server-side, altid stabil) > client-CLIP (WASM, upålidelig)
+  const [railwayEmbedding, ocrResult] = await Promise.all([
+    getServerEmbedding(base64),
+    Promise.race([
+      ocrCardNumber(normalizedBuf, safeGame),
+      new Promise(resolve => setTimeout(() => resolve(null), 12000)),
+    ]).catch(() => null),
   ])
 
-  // Byg kandidat-pool
-  let candidatePool
-  if (usedClip) {
-    // CLIP-resultater som primær pool — tilføj phash-similarity som bonus
-    candidatePool = clipResults.map(c => ({
-      id:         c.id,
-      clipSim:    typeof c.similarity === 'number' ? c.similarity : 0,
-      phashDist:  null,   // hentes ikke fra DB i CLIP-mode (for hurtigt)
-    }))
-  } else {
-    // Kun phash tilgængeligt (CLIP-embeddings endnu ikke backfillet)
-    candidatePool = phashResults.map(c => ({
-      id:         c.id,
-      clipSim:    0,
-      phashDist:  c.dist,
-    }))
+  const clientFallback = (clientEmbedding && Array.isArray(clientEmbedding) && clientEmbedding.length === 512)
+    ? clientEmbedding : null
+  const activeEmbedding = railwayEmbedding ?? clientFallback
+
+  const clipResultsRaw = activeEmbedding
+    ? await clipSearch(activeEmbedding, safeGame, matchCount).catch(() => null)
+    : null
+
+  // phash (hurtigt, kør efter parallelfasen)
+  const serverPhash   = await computePhash(normalizedBuf)
+  const uploadedPhash = serverPhash ?? (typeof incomingPhash === 'string' && incomingPhash.length === 16 ? incomingPhash : null)
+
+  // ── Processér OCR-resultat ────────────────────────────────────────────────
+  const ocrNum      = ocrResult?.number   ?? null
+  const ocrSetTotal = ocrResult?.setTotal ?? null
+  const ocrIsCode   = ocrResult?.isCode   ?? false
+  let exactIds  = new Set()
+  let numberIds = new Set()
+
+  if (ocrNum) {
+    const found = await fetchByNumber(safeGame, ocrNum, ocrSetTotal, ocrIsCode)
+    exactIds  = found.exact
+    numberIds = found.numberOnly
   }
 
-  // ── Signal 3: kortnummer OCR (additive bonus) ─────────────────────────
-  let ocrNum   = null
-  let numberIds = new Set()
-  try {
-    ocrNum = await ocrCardNumber(normalizedBuf)
-    if (ocrNum) numberIds = await fetchByNumber(safeGame, ocrNum)
-  } catch { /* ignore */ }
+  // ── FAST PATH: OCR giver ét entydigt kort ──────────────────────────────────
+  // Pokemon 123/165, MTG 45/280, Lorcana 12/204: sætstørrelsen identificerer sættet.
+  // Kortets OCR-nummer identificerer dermed kortet 100%.
+  if (exactIds.size === 1) {
+    const [directId] = exactIds
+    const [card] = await fetchDetails([directId])
+    if (card) {
+      return res.status(200).json({
+        candidates:  [toCandidate(card, 0.99)],
+        confidence:  'high',
+        best:        toCandidate(card, 0.99),
+        ocr:         { number: ocrNum, setTotal: ocrSetTotal },
+        method:      'ocr-direct',
+        meta:        { game: safeGame, clip: false, pool: 1 },
+      })
+    }
+  }
 
-  // ── Kombineret ranking ─────────────────────────────────────────────────
+  // ── RARITY PATH: OCR giver 2-10 varianter (samme kort, forskellig sjældenhed) ──
+  // YGO BLVO-EN042 kan eksistere i 8 rarities — CLIP + phash vælger den rigtige.
+  // DBS, One Piece alt-arts, Pokemon reverse-holo varianter.
+  if (exactIds.size >= 2 && exactIds.size <= 10) {
+    const rarityCards = await fetchDetails([...exactIds])
+
+    let best = null
+    let bestSim = 0
+
+    // Forsøg 1: CLIP rangerer rarities (foil-border → anderledes embedding)
+    if (clipResultsRaw && clipResultsRaw.length > 0) {
+      const inPool = clipResultsRaw.filter(c => exactIds.has(c.id))
+      if (inPool.length > 0) {
+        best    = rarityCards.find(c => c.id === inPool[0].id) ?? null
+        bestSim = inPool[0].similarity ?? 0.90
+      }
+    }
+
+    // Forsøg 2: phash skelner rarity (common border vs holofoil border)
+    if (!best && uploadedPhash) {
+      const sorted = rarityCards
+        .map(c => ({ c, dist: hammingDist(uploadedPhash, c.phash) }))
+        .sort((a, b) => a.dist - b.dist)
+      if (sorted.length > 0) { best = sorted[0].c; bestSim = 0.88 }
+    }
+
+    // Fallback: første rarity
+    if (!best) { best = rarityCards[0]; bestSim = 0.85 }
+
+    const candidates = rarityCards.map(c =>
+      ({ ...toCandidate(c, c.id === best.id ? bestSim : bestSim - 0.08), _clip: 0 })
+    )
+
+    return res.status(200).json({
+      candidates,
+      confidence: 'high',
+      best:       { ...toCandidate(best, bestSim), _clip: 0 },
+      ocr:        { number: ocrNum, setTotal: ocrSetTotal },
+      method:     'ocr-rarity',
+      meta:       { game: safeGame, clip: !!(clipResultsRaw?.length), pool: rarityCards.length },
+    })
+  }
+
+  // ── STANDARD PATH: CLIP + phash + OCR bonus ──────────────────────────────
+  // Bruges når OCR fejler eller giver for bredt et match (>10 kort).
+  let usedClip    = false
+  let clipResults = clipResultsRaw
+
+  if (clipResults && clipResults.length > 0) usedClip = true
+
+  let candidatePool
+  if (usedClip) {
+    candidatePool = clipResults.map(c => ({
+      id:        c.id,
+      clipSim:   typeof c.similarity === 'number' ? c.similarity : 0,
+      phashDist: uploadedPhash ? hammingDist(uploadedPhash, c.phash) : null,
+    }))
+  } else {
+    // Ingen CLIP (embedding ikke klar) → phash-only
+    const phashHits = uploadedPhash ? await phashSearch(safeGame, uploadedPhash) : []
+    candidatePool = phashHits.map(c => ({ id: c.id, clipSim: 0, phashDist: c.dist }))
+  }
+
+  if (!candidatePool.length) {
+    return res.status(200).json({
+      candidates: [], confidence: 'low', best: null,
+      ocr:  ocrNum ? { number: ocrNum, setTotal: ocrSetTotal } : null,
+      method: 'no-candidates',
+      meta:  { game: safeGame, clip: usedClip, pool: 0 },
+    })
+  }
+
+  // Kombineret scoring med OCR-bonus
+  const w = PHASH_SCORE_WEIGHTS[safeGame] ?? PHASH_SCORE_WEIGHTS.default
   const scored = candidatePool.map(c => {
-    const clip   = c.clipSim                                         // 0–1  (primær)
-    const ph     = c.phashDist !== null ? 1 - c.phashDist / 64 : 0  // 0–1  (sekundær)
-    const number = numberIds.has(c.id) ? 0.40 : 0                   // bonus: nummer-match
-
-    const total = usedClip
-      ? clip * 0.75 + ph * 0.15 + number
-      : ph   * 0.75             + number
-
+    const clip   = c.clipSim
+    const ph     = c.phashDist !== null ? 1 - c.phashDist / 64 : 0
+    const number = exactIds.has(c.id) ? 0.50 : numberIds.has(c.id) ? 0.20 : 0
+    const total  = usedClip
+      ? clip * w.clip + ph * w.phash + number
+      : ph * 0.75 + number
     return { id: c.id, total, clipSim: clip, phashSim: ph }
   }).sort((a, b) => b.total - a.total).slice(0, 5)
 
-  // Hent fuld kortdata
-  const details  = await fetchDetails(scored.map(c => c.id))
-  const detMap   = Object.fromEntries(details.map(c => [c.id, c]))
+  const details = await fetchDetails(scored.map(c => c.id))
+  const detMap  = Object.fromEntries(details.map(c => [c.id, c]))
 
   const candidates = scored.map(s => {
     const card = detMap[s.id] || { id: s.id }
@@ -221,17 +431,15 @@ export default async function handler(req, res) {
     }
   })
 
-  const top       = candidates[0]
-  const confidence = top?.similarity >= 0.90 ? 'high'
-    : top?.similarity >= 0.75                ? 'medium'
-    : 'low'
+  const top        = candidates[0]
+  const confidence = top?.similarity >= 0.90 ? 'high' : top?.similarity >= 0.75 ? 'medium' : 'low'
 
   return res.status(200).json({
     candidates,
     confidence,
-    best:    confidence !== 'low' ? candidates[0] : null,
-    ocr:     ocrNum ? { number: ocrNum } : null,
-    method:  usedClip ? 'clip+phash+ocr' : 'phash+ocr',
-    meta:    { game: safeGame, clip: usedClip, pool: candidatePool.length },
+    best:   confidence !== 'low' ? candidates[0] : null,
+    ocr:    ocrNum ? { number: ocrNum, setTotal: ocrSetTotal } : null,
+    method: usedClip ? 'clip+phash+ocr' : 'phash+ocr',
+    meta:   { game: safeGame, clip: usedClip, pool: candidatePool.length },
   })
 }

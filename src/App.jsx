@@ -762,20 +762,66 @@ function ScanScreen({ user, profile, onScanDone, modelState, modelProgress }) {
         img.src = frontImg
       })
 
-      // Beregn CLIP embedding client-side hvis model er indlæst
+      // Beregn client-side phash via canvas (virker altid — ingen sharp nødvendig)
+      const clientPhash = await (async () => {
+        try {
+          return await new Promise(resolve => {
+            const SZ = 8
+            const img = new Image()
+            img.onload = () => {
+              try {
+                const cv = document.createElement('canvas')
+                cv.width = SZ + 1; cv.height = SZ
+                cv.getContext('2d').drawImage(img, 0, 0, SZ + 1, SZ)
+                const d = cv.getContext('2d').getImageData(0, 0, SZ + 1, SZ).data
+                let bits = ''
+                for (let r = 0; r < SZ; r++)
+                  for (let c = 0; c < SZ; c++) {
+                    const i = (r * (SZ + 1) + c) * 4
+                    const j = (r * (SZ + 1) + c + 1) * 4
+                    const gL = 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2]
+                    const gR = 0.2126 * d[j] + 0.7152 * d[j + 1] + 0.0722 * d[j + 2]
+                    bits += gL < gR ? '1' : '0'
+                  }
+                let hex = ''
+                for (let i = 0; i < bits.length; i += 4) hex += parseInt(bits.slice(i, i + 4), 2).toString(16)
+                resolve(hex)
+              } catch { resolve(null) }
+            }
+            img.onerror = () => resolve(null)
+            img.src = resizedImage
+          })
+        } catch { return null }
+      })()
+
+      // CLIP embedding — beregn client-side hvis model er klar (20s timeout)
       let embedding = null
       try {
         const { isModelLoaded, extractEmbeddingFromDataUrl } = await import('./recognition/EmbeddingExtractor.js')
         if (isModelLoaded()) {
-          embedding = await extractEmbeddingFromDataUrl(resizedImage)
+          embedding = await Promise.race([
+            extractEmbeddingFromDataUrl(resizedImage),
+            new Promise(resolve => setTimeout(() => resolve(null), 20000)),
+          ])
         }
-      } catch { /* CLIP ikke tilgængeligt — phash alene */ }
+      } catch { /* phash alene */ }
 
-      const res = await fetch('/api/scan-free', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: resizedImage, game, embedding }),
-      })
+      const controller = new AbortController()
+      const apiTimeout = setTimeout(() => controller.abort(), 25000)
+      let res
+      try {
+        res = await fetch('/api/scan-free', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image: resizedImage, game, embedding, clientPhash }),
+          signal: controller.signal,
+        })
+      } catch (e) {
+        if (e.name === 'AbortError') throw new Error('Scan tog for lang tid — prøv igen')
+        throw e
+      } finally {
+        clearTimeout(apiTimeout)
+      }
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({}))
@@ -796,7 +842,8 @@ function ScanScreen({ user, profile, onScanDone, modelState, modelProgress }) {
         match:      autoMatched ? candidates[0] : null,
         candidates,
         confidence,
-        ocrText:    data.ocr?.number ? `#${data.ocr.number}${data.ocr.total ? `/${data.ocr.total}` : ''}` : null,
+        ocrText:    data.ocr?.number ? `#${data.ocr.number}${data.ocr.setTotal ? `/${data.ocr.setTotal}` : ''}` : null,
+        _debug:     { method: data.method, ocr: data.ocr, meta: data.meta, sim: candidates[0]?.similarity },
       })
 
       const today = new Date().toISOString().slice(0, 10)
@@ -896,6 +943,10 @@ function ScanScreen({ user, profile, onScanDone, modelState, modelProgress }) {
   const freeScanLabel = profile?.is_pro ? 'Unlimited' : `${Math.max(0, FREE_DAILY_LIMIT - dailyScans)}/${FREE_DAILY_LIMIT} today`
   const aiGradeLabel  = profile?.is_pro ? `${aiCredits}/${AI_CREDITS_MAX} Ai Scans` : 'Pro only'
   const TC = scanMode === 'free' ? COLORS.success : COLORS.gold
+
+  const modelReady   = modelState === 'ready' || modelState === 'error'
+  const modelLoading = modelState === 'loading' || modelState === 'idle'
+  const freeBtnDisabled = loading || !frontImg || !modelReady
 
   return (
     <div style={{ padding: '16px 16px 100px', maxWidth: 480, margin: '0 auto' }}>
@@ -1101,16 +1152,24 @@ function ScanScreen({ user, profile, onScanDone, modelState, modelProgress }) {
             <div style={{ fontSize: 11, color: '#44444f' }}>Prøv igen i morgen, eller gå Pro nu</div>
           </div>
         ) : (
-          <button onClick={!loading && frontImg ? freeScan : undefined} disabled={loading || !frontImg} style={{
+          <button onClick={!freeBtnDisabled ? freeScan : undefined} disabled={freeBtnDisabled} style={{
             width: '100%', height: 60, borderRadius: 18,
-            background: loading || !frontImg ? 'rgba(0,184,148,0.25)' : 'linear-gradient(135deg, #00c49a 0%, #009678 100%)',
-            border: 'none', cursor: loading || !frontImg ? 'not-allowed' : 'pointer',
+            background: freeBtnDisabled ? 'rgba(0,184,148,0.25)' : 'linear-gradient(135deg, #00c49a 0%, #009678 100%)',
+            border: 'none', cursor: freeBtnDisabled ? 'not-allowed' : 'pointer',
             display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
             color: '#fff', fontWeight: 800, fontSize: 18, letterSpacing: -0.2, fontFamily: 'inherit',
-            boxShadow: loading || !frontImg ? 'none' : '0 4px 20px rgba(0,198,154,0.3)',
+            boxShadow: freeBtnDisabled ? 'none' : '0 4px 20px rgba(0,198,154,0.3)',
             transition: 'all .18s',
           }}>
-            {loading ? (<><Spinner size={20} color="#fff" /> Scanning…</>) : (
+            {loading ? (
+              <><Spinner size={20} color="#fff" /> Scanning…</>
+            ) : modelLoading ? (
+              <><Spinner size={16} color="rgba(255,255,255,0.7)" />
+                <span style={{ fontSize: 14, opacity: 0.85 }}>
+                  AI loading{modelProgress > 0 ? ` ${modelProgress}%` : '…'}
+                </span>
+              </>
+            ) : (
               <><svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>Free Scan</>
             )}
           </button>
@@ -1288,6 +1347,16 @@ function FreeScanResult({ result, game, frontImg, user, onSave, onSwitchToAI }) 
           {Math.round((result.confidence || 0) * 100)}% confident
         </div>
       </div>
+
+      {/* Debug panel — fjernes når scan er stabil */}
+      {result._debug && (
+        <div style={{ padding: '8px 12px', borderRadius: 10, background: '#111', border: '1px solid #333', marginBottom: 12, fontSize: 11, color: '#888', fontFamily: 'monospace', lineHeight: 1.7 }}>
+          <div><span style={{ color: '#555' }}>method:</span> <span style={{ color: '#f59e0b' }}>{result._debug.method}</span></div>
+          <div><span style={{ color: '#555' }}>ocr:</span> {result._debug.ocr ? <span style={{ color: '#22c55e' }}>{result._debug.ocr.number}{result._debug.ocr.setTotal ? `/${result._debug.ocr.setTotal}` : ''}</span> : <span style={{ color: '#ef4444' }}>ingen</span>}</div>
+          <div><span style={{ color: '#555' }}>clip:</span> {result._debug.meta?.clip ? <span style={{ color: '#22c55e' }}>ja</span> : <span style={{ color: '#ef4444' }}>nej</span>} · <span style={{ color: '#555' }}>pool:</span> {result._debug.meta?.pool}</div>
+          <div><span style={{ color: '#555' }}>sim:</span> {result._debug.sim}</div>
+        </div>
+      )}
 
       {/* Candidate selector (if not auto-matched) */}
       {!result.autoMatched && candidates.length > 0 && (

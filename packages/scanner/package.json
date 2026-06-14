@@ -1,0 +1,16 @@
+{
+  "name": "gradedex-embedding-server",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Server-side CLIP embedding microservice for GradeDex scan pipeline",
+  "scripts": {
+    "start": "node railway-server.js"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^4.2.0",
+    "sharp": "^0.33.4"
+  },
+  "engines": {
+    "node": "20.x"
+  }
+}
