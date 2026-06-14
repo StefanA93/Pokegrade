@@ -1353,7 +1353,7 @@ function FreeScanResult({ result, game, frontImg, user, onSave, onSwitchToAI }) 
         <div style={{ padding: '8px 12px', borderRadius: 10, background: '#111', border: '1px solid #333', marginBottom: 12, fontSize: 11, color: '#888', fontFamily: 'monospace', lineHeight: 1.7 }}>
           <div><span style={{ color: '#555' }}>method:</span> <span style={{ color: '#f59e0b' }}>{result._debug.method}</span></div>
           <div><span style={{ color: '#555' }}>ocr:</span> {result._debug.ocr ? <span style={{ color: '#22c55e' }}>{result._debug.ocr.number}{result._debug.ocr.setTotal ? `/${result._debug.ocr.setTotal}` : ''}</span> : <span style={{ color: '#ef4444' }}>ingen</span>}</div>
-          <div><span style={{ color: '#555' }}>clip:</span> {result._debug.meta?.clip ? <span style={{ color: '#22c55e' }}>ja</span> : <span style={{ color: '#ef4444' }}>nej</span>} · <span style={{ color: '#555' }}>pool:</span> {result._debug.meta?.pool}</div>
+          <div><span style={{ color: '#555' }}>clip:</span> {result._debug.meta?.clip ? <span style={{ color: '#22c55e' }}>ja</span> : <span style={{ color: '#ef4444' }}>nej</span>} · <span style={{ color: '#555' }}>clipRaw:</span> {result._debug.meta?.clipRaw ?? '?'} · <span style={{ color: '#555' }}>pool:</span> {result._debug.meta?.pool}</div>
           <div><span style={{ color: '#555' }}>sim:</span> {result._debug.sim}</div>
         </div>
       )}

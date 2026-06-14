@@ -2,7 +2,7 @@ name: Price Refresh
 
 on:
   schedule:
-    - cron: '0 3 * * *'   # dagligt kl. 03:00 UTC
+    - cron: '0 21 * * *'  # dagligt kl. 21:00 UTC (efter TCGCSV opdaterer ~20:00 UTC)
   workflow_dispatch:        # kan også køres manuelt fra Actions-tab
 
 jobs:
@@ -51,5 +51,5 @@ jobs:
       - name: Dragon Ball — tcgapi.dev (TCGPlayer USD)
         run: node scripts/backfill-dragonball-prices.js
 
-      - name: Pokemon Japan — tcgapi.dev (TCGPlayer USD)
+      - name: Pokemon Japan — TCGCSV (TCGPlayer JP kategori 85, USD)
         run: node scripts/backfill-pokemonjp-prices.js

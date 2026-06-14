@@ -4,7 +4,8 @@
   "outputDirectory": "dist",
   "framework": "vite",
   "functions": {
-    "api/scan-free.js": { "maxDuration": 60, "includeFiles": "node_modules/tesseract.js-core/**" }
+    "api/scan-free.js": { "maxDuration": 60, "includeFiles": "node_modules/tesseract.js-core/**" },
+    "api/debug-sharp.js": { "maxDuration": 30 }
   },
   "rewrites": [
     { "source": "/(.*)", "destination": "/index.html" }

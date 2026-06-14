@@ -22,9 +22,13 @@ async function getModel() {
 export async function extractEmbedding(imageBuffer) {
   const model = await getModel()
 
-  // Sharp → raw RGB pixel data → RawImage (Node.js safe, ingen data-URL)
+  // Sharp → raw RGB pixel data → RawImage (Node.js safe, ingen data-URL).
+  // VIGTIGT: ingen resize her — CLIP-processoren laver selv resize(224)+center-crop,
+  // præcis som backfill (RawImage.fromURL). Et manuelt stretch til 224x224 forvrænger
+  // aspect ratio og giver embeddings der IKKE flugter med kataloget (cosine 0.85 vs 1.0).
+  // withoutEnlargement + fit:inside kun som memory-guard for ekstremt store billeder.
   const { data, info } = await sharp(imageBuffer)
-    .resize(224, 224, { fit: 'fill' })
+    .resize(512, 512, { fit: 'inside', withoutEnlargement: true })
     .removeAlpha()
     .raw()
     .toBuffer({ resolveWithObject: true })

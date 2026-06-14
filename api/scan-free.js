@@ -17,8 +17,8 @@ import Tesseract from 'tesseract.js'
 
 const SUPABASE_URL  = process.env.SUPABASE_URL
 const SUPABASE_KEY  = process.env.SUPABASE_SERVICE_KEY
-const EMBED_URL     = process.env.EMBED_SERVICE_URL   // Railway: https://xxx.up.railway.app
-const EMBED_SECRET  = process.env.EMBED_SECRET        // Delt hemmelighed
+const EMBED_URL     = process.env.EMBED_SERVICE_URL?.trim()   // Railway: https://xxx.up.railway.app
+const EMBED_SECRET  = process.env.EMBED_SECRET?.trim()        // Delt hemmelighed
 
 const CORS = {
   'Access-Control-Allow-Origin':  '*',
@@ -120,8 +120,8 @@ async function ocrCardNumber(imgBuf, game) {
 
 // ─── Railway embedding service ────────────────────────────────────────────
 async function getServerEmbedding(base64Image) {
-  if (!EMBED_URL) return null
-  try {
+  if (!EMBED_URL) { console.error('[embed] EMBED_SERVICE_URL not set'); return null }
+  const attempt = async () => {
     const r = await fetch(`${EMBED_URL}/embed`, {
       method:  'POST',
       headers: {
@@ -129,12 +129,24 @@ async function getServerEmbedding(base64Image) {
         ...(EMBED_SECRET ? { Authorization: `Bearer ${EMBED_SECRET}` } : {}),
       },
       body:   JSON.stringify({ image: `data:image/jpeg;base64,${base64Image}` }),
-      signal: AbortSignal.timeout(8000),
+      signal: AbortSignal.timeout(18000),
     })
-    if (!r.ok) return null
+    if (!r.ok) throw new Error(`Railway ${r.status}`)
     const { embedding } = await r.json()
-    return Array.isArray(embedding) && embedding.length === 512 ? embedding : null
-  } catch { return null }
+    if (!Array.isArray(embedding) || embedding.length !== 512) throw new Error('bad embedding shape')
+    return embedding
+  }
+  try {
+    return await attempt()
+  } catch (e) {
+    console.error('[embed] attempt 1 failed:', e.message, '— retrying')
+    try {
+      return await attempt()
+    } catch (e2) {
+      console.error('[embed] attempt 2 failed:', e2.message)
+      return null
+    }
+  }
 }
 
 // ─── Supabase ─────────────────────────────────────────────────────────────
@@ -157,6 +169,7 @@ async function clipSearch(embedding, game, count) {
     method:  'POST',
     headers: sbh(),
     body:    JSON.stringify({ query_embedding: `[${embedding.join(',')}]`, game_filter: game, match_count: count }),
+    signal:  AbortSignal.timeout(5000),
   })
   if (!r.ok) return null
   return r.json()
@@ -276,8 +289,19 @@ export default async function handler(req, res) {
 
   // ── Parallel: Railway embedding + OCR kører samtidigt ────────────────────
   // Prioritet: Railway (server-side, altid stabil) > client-CLIP (WASM, upålidelig)
+  // VIGTIGT: bevar aspect ratio (fit:inside) — IKKE stretch. Railway/CLIP-processoren
+  // laver selv resize(224)+center-crop, præcis som backfill. Stretch gav cosine 0.85
+  // mod kataloget (skulle være ~1.0) → forkerte matches.
+  let clipInputBase64 = null
+  try {
+    const thumb = await sharp(normalizedBuf).resize(384, 384, { fit: 'inside' }).jpeg({ quality: 90 }).toBuffer()
+    clipInputBase64 = thumb.toString('base64')
+  } catch { clipInputBase64 = normalizedBuf.toString('base64') }
+
+  const scanDiag = { thumbLen: clipInputBase64?.length ?? 0, embedUrlOk: !!EMBED_URL }
+  const _t0Rwy = Date.now()
   const [railwayEmbedding, ocrResult] = await Promise.all([
-    getServerEmbedding(base64),
+    getServerEmbedding(clipInputBase64).then(e => { scanDiag.railwayMs = Date.now() - _t0Rwy; scanDiag.railwayOk = !!e; return e }),
     Promise.race([
       ocrCardNumber(normalizedBuf, safeGame),
       new Promise(resolve => setTimeout(() => resolve(null), 12000)),
@@ -288,8 +312,17 @@ export default async function handler(req, res) {
     ? clientEmbedding : null
   const activeEmbedding = railwayEmbedding ?? clientFallback
 
-  const clipResultsRaw = activeEmbedding
-    ? await clipSearch(activeEmbedding, safeGame, matchCount).catch(() => null)
+  let clipAll = null
+  if (activeEmbedding) {
+    const _t0Clip = Date.now()
+    const _clipRaw = await clipSearch(activeEmbedding, safeGame, matchCount).catch(e => { scanDiag.clipErr = e.message; return null })
+    scanDiag.clipMs = Date.now() - _t0Clip
+    scanDiag.clipStatus = Array.isArray(_clipRaw) ? _clipRaw.length : (_clipRaw === null ? 'null' : 'other')
+    clipAll = _clipRaw
+  }
+  // Filtrer produkter (blister-packs, tins, booster-boxes) fra CLIP — de forurener ranking
+  const clipResultsRaw = clipAll
+    ? clipAll.filter(c => !String(c.id ?? '').includes('product'))
     : null
 
   // phash (hurtigt, kør efter parallelfasen)
@@ -372,10 +405,16 @@ export default async function handler(req, res) {
 
   // ── STANDARD PATH: CLIP + phash + OCR bonus ──────────────────────────────
   // Bruges når OCR fejler eller giver for bredt et match (>10 kort).
+  //
+  // Fallback-hierarki (IVFFlat er sparse for kamerafoto-embeddings):
+  //   1. CLIP pool ≥ 5  → brug CLIP som primær (clip*0.65 + phash*0.25)
+  //   2. CLIP pool 1-4  → CLIP er for sparsom; supplér med phash-pool
+  //   3. Ingen CLIP      → ren phash-only
+  const MIN_CLIP_POOL = 5
   let usedClip    = false
-  let clipResults = clipResultsRaw
+  let clipResults = (clipResultsRaw && clipResultsRaw.length >= MIN_CLIP_POOL) ? clipResultsRaw : null
 
-  if (clipResults && clipResults.length > 0) usedClip = true
+  if (clipResults) usedClip = true
 
   let candidatePool
   if (usedClip) {
@@ -385,7 +424,10 @@ export default async function handler(req, res) {
       phashDist: uploadedPhash ? hammingDist(uploadedPhash, c.phash) : null,
     }))
   } else {
-    // Ingen CLIP (embedding ikke klar) → phash-only
+    // Ingen brugbar CLIP (embedding mangler eller IVFFlat for sparsom) → phash-only
+    if (clipResultsRaw && clipResultsRaw.length > 0) {
+      console.log('[scan] clip pool sparse (' + clipResultsRaw.length + '), fallback til phash')
+    }
     const phashHits = uploadedPhash ? await phashSearch(safeGame, uploadedPhash) : []
     candidatePool = phashHits.map(c => ({ id: c.id, clipSim: 0, phashDist: c.dist }))
   }
@@ -395,7 +437,7 @@ export default async function handler(req, res) {
       candidates: [], confidence: 'low', best: null,
       ocr:  ocrNum ? { number: ocrNum, setTotal: ocrSetTotal } : null,
       method: 'no-candidates',
-      meta:  { game: safeGame, clip: usedClip, pool: 0 },
+      meta:  { game: safeGame, clip: usedClip, pool: 0, ...scanDiag },
     })
   }
 
@@ -440,6 +482,6 @@ export default async function handler(req, res) {
     best:   confidence !== 'low' ? candidates[0] : null,
     ocr:    ocrNum ? { number: ocrNum, setTotal: ocrSetTotal } : null,
     method: usedClip ? 'clip+phash+ocr' : 'phash+ocr',
-    meta:   { game: safeGame, clip: usedClip, pool: candidatePool.length },
+    meta:   { game: safeGame, clip: usedClip, clipRaw: clipResultsRaw?.length ?? 0, pool: candidatePool.length, ...scanDiag },
   })
 }

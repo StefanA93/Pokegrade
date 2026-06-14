@@ -8,7 +8,7 @@
   },
   "dependencies": {
     "@huggingface/transformers": "^4.2.0",
-    "sharp": "^0.33.4"
+    "sharp": "^0.34.5"
   },
   "engines": {
     "node": "20.x"

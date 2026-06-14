@@ -29,3 +29,5 @@ num_zone_debug.png
 
 # Backfill progress tracking
 scripts/.progress-*.txt
+
+.env*.local

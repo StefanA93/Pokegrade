@@ -34,8 +34,17 @@ async function patchWithRetry(id, phash_art) {
 async function downloadImage(url) {
   const ctrl = new AbortController()
   const t    = setTimeout(() => ctrl.abort(), DL_TIMEOUT)
+  const headers = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0',
+  }
+  if (url.includes('tcggo.com')) {
+    headers['Referer'] = 'https://www.tcggo.com/'
+  }
+  if (url.includes('onepiece-cardgame.com')) {
+    headers['Referer'] = 'https://en.onepiece-cardgame.com/'
+  }
   try {
-    const r = await fetch(url, { signal: ctrl.signal })
+    const r = await fetch(url, { signal: ctrl.signal, headers })
     if (!r.ok) throw new Error(`HTTP ${r.status}`)
     return Buffer.from(await r.arrayBuffer())
   } finally {
@@ -56,6 +65,7 @@ async function processGame(game) {
 
     const queue   = [...rows]
     const updates = []
+    const doneBeforeBatch = done
 
     while (queue.length) {
       const batch   = queue.splice(0, CONCUR)
@@ -86,7 +96,12 @@ async function processGame(game) {
       await sleep(25)
     }
 
-    offset += rows.length
+    const savedThisBatch = done - doneBeforeBatch
+    if (savedThisBatch > 0) {
+      offset = 0
+    } else {
+      offset += rows.length
+    }
     process.stdout.write(`\r  ${done} gemt | ${errors} fejl | offset ${offset}`)
 
     await sleep(200)

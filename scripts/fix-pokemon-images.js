@@ -58,6 +58,65 @@ async function fetchPtcgCardsForSet(setId) {
   return all
 }
 
+// Manuelle overrides for sæt hvor auto-matching fejler.
+// Bruges som FØRSTE prioritet før auto-matching.
+// set_id (som string) → pokemontcg.io set kode
+const MANUAL_SET_OVERRIDES = {
+  // Forkert matchet af auto-matcher (via substring-fejl)
+  '5500149': 'swshp',   // SWSH Promo Cards → auto-mapper fejlagtigt til swsh1
+  '5500177': 'xyp',     // XY Promos → auto-mapper fejlagtigt til xy1
+  '5500083': 'hif',     // Hidden Fates: Shiny Vault → fejl: sm115
+  '5500125': 'hif',     // Hidden Fates → fejl: sm115
+  '5500025': 'swsh1',   // SWSH01: Sword & Shield Base Set → fejl: base1
+  '5500032': 'sv1',     // SV01: Scarlet & Violet Base Set → fejl: base1
+  '5500018': 'sm1',     // SM Base Set → fejl: base1
+  '5500120': 'xy1',     // XY Base Set → fejl: base1
+  '5500070': 'svp',     // SV: Scarlet & Violet Promo Cards → fejl: sv1
+  // XY sæt der alle fejlagtigt mapper til xy1 via "xy" substring
+  '5500067': 'xy4',     // XY - Phantom Forces
+  '5500027': 'xy3',     // XY - Furious Fists
+  '5500118': 'xy5',     // XY - Primal Clash
+  '5500095': 'xy6',     // XY - Roaring Skies
+  '5500188': 'xy9',     // XY - BREAKpoint
+  '5500004': 'xy11',    // XY - Steam Siege
+  '5500019': 'xy2',     // XY - Flashfire
+  '5500147': 'xy12',    // XY - Evolutions
+  '5500196': 'xy7',     // XY - Ancient Origins
+  '5500169': 'xy10',    // XY - Fates Collide
+  '5500195': 'xy8',     // XY - BREAKthrough
+
+  // Umatched: "and" vs "&" mismatch
+  '5500115': 'bw1',     // Black and White (ptcg: "Black & White")
+  '5500091': 'bwp',     // Black and White Promos (ptcg: "BW Black Star Promos")
+  '5500037': 'hgss1',   // HeartGold SoulSilver
+  '5500034': 'dp1',     // Diamond and Pearl (ptcg: "Diamond & Pearl")
+  '5500116': 'dpp',     // Diamond and Pearl Promos (ptcg: "DP Black Star Promos")
+  '5500052': 'ex1',     // Ruby and Sapphire (ptcg: "EX Ruby & Sapphire")
+
+  // Umatched: promo-sæt
+  '5500076': 'smp',     // SM Promos (ptcg: "SM Black Star Promos")
+  '5500055': 'np',      // Nintendo Promos (ptcg: "Nintendo Black Star Promos")
+  '5500065': 'hsp',     // HGSS Promos (ptcg: "HGSS Black Star Promos")
+
+  // Umatched: øvrige sæt
+  '5500021': 'pgo',     // Pokemon GO
+  '5500133': 'g1',      // Generations: Radiant Collection
+
+  // McDonald's promo-sæt (år-specifik kode)
+  '5500097': 'mcd11',
+  '5500164': 'mcd12',
+  '5500200': 'mcd14',
+  '5500172': 'mcd15',
+  '5500002': 'mcd16',
+  '5500145': 'mcd17',
+  '5500193': 'mcd18',
+  '5500203': 'mcd19',
+  '5500198': 'mcd22',
+  '5500033': 'mcd23',
+  '5500136': 'mcd24',
+  '5500117': 'mcd25',
+}
+
 async function run() {
   // ── 1. Hent alle pokemontcg.io sæt ────────────────────────────────────────
   console.log('\n🔍 Henter pokemontcg.io sæt-liste…')
@@ -79,10 +138,18 @@ async function run() {
 
   // ── 3. Match catalog-sæt → pokemontcg.io set-kode ────────────────────────
   const setMapping = {}   // catalog set_id → ptcg set-kode
-  let matched = 0
+  let matched = 0, manualMatched = 0
 
   for (const [setId, setName] of uniqueSets) {
     if (!setName) continue
+
+    // Manuel override har højeste prioritet
+    if (MANUAL_SET_OVERRIDES[String(setId)]) {
+      setMapping[setId] = MANUAL_SET_OVERRIDES[String(setId)]
+      matched++
+      manualMatched++
+      continue
+    }
 
     // Strip prefix som "SV10: ", "SWSH: ", "SV: " osv.
     const stripped = setName.replace(/^[A-Z0-9]+(?:pt\d+)?:\s*/i, '').trim().toLowerCase()
@@ -91,7 +158,8 @@ async function run() {
     let code = nameToCode.get(stripped)
 
     // Fuzzy: find ptcg-sæt der indeholder vores strippede navn
-    if (!code) {
+    // Guard: kun hvis stripped er mindst 6 tegn for at undgå "xy" / "sm" falsk-positiver
+    if (!code && stripped.length >= 6) {
       for (const [ptcgName, ptcgCode] of nameToCode) {
         if (ptcgName.includes(stripped) || stripped.includes(ptcgName)) {
           code = ptcgCode
@@ -106,7 +174,7 @@ async function run() {
     }
   }
 
-  console.log(`✅ ${matched}/${uniqueSets.length} sæt matchet til pokemontcg.io\n`)
+  console.log(`✅ ${matched}/${uniqueSets.length} sæt matchet (${manualMatched} manuelt, ${matched - manualMatched} auto)\n`)
 
   // ── 4. For hvert matchet sæt: hent ptcg-kort + opdater image_url ──────────
   let totalUpdated = 0

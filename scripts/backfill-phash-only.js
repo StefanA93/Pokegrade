@@ -80,11 +80,31 @@ async function run() {
     }
 
     // Parallelle PATCH-requests — kun phash opdateres, ingen NOT NULL-konflikter
+    let saved = 0
     for (let i = 0; i < results.length; i += PATCH_CONCURRENCY) {
       const chunk = results.slice(i, i + PATCH_CONCURRENCY)
-      await Promise.all(chunk.map(r => dbUpdate('card_catalog', { id: r.id }, { phash: r.phash })))
+      const outcomes = await Promise.allSettled(
+        chunk.map(async r => {
+          for (let attempt = 0; attempt < 3; attempt++) {
+            try {
+              await dbUpdate('card_catalog', { id: r.id }, { phash: r.phash })
+              return
+            } catch (err) {
+              if (attempt < 2 && /DB update failed: 5\d\d/.test(err.message)) {
+                await sleep(1000 * (attempt + 1))
+              } else {
+                throw err
+              }
+            }
+          }
+        })
+      )
+      for (const o of outcomes) {
+        if (o.status === 'fulfilled') saved++
+        else { errors++; failed.add(chunk[outcomes.indexOf(o)]?.id) }
+      }
     }
-    done += results.length
+    done += saved
 
     batches++
     const pct = total > 0 ? ((done / total) * 100).toFixed(1) : '?'

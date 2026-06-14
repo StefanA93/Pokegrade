@@ -1,0 +1,16 @@
+node_modules
+.cache
+meilisearch_data
+meili_data
+meilisearch.exe
+eng.traineddata
+server
+scripts
+supabase
+dumps
+docs
+dist
+.vercel
+*.sql
+*.toml
+num_zone_debug.png

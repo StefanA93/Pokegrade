@@ -34,20 +34,20 @@ async function run() {
   const allRows = []
   for (let offset = 0; ; offset += 1000) {
     const batch = await dbSelect('card_catalog',
-      `game=eq.yugioh&select=set_id,set_name&limit=1000&offset=${offset}&order=set_id.asc`)
+      `game=eq.yugioh&phash_art=is.null&image_url=not.is.null&select=set_name&limit=1000&offset=${offset}`)
     allRows.push(...batch)
     if (batch.length < 1000) break
   }
-  const uniqueSets = [...new Map(allRows.map(r => [r.set_id, r.set_name])).entries()]
-    .filter(([, name]) => name)
-  console.log(`   ${uniqueSets.length} unikke sæt i catalog\n`)
+  const uniqueSets = [...new Set(allRows.map(r => r.set_name).filter(Boolean))]
+    .map(name => [name, name])
+  console.log(`   ${uniqueSets.length} unikke sæt i catalog (med kort der mangler phash)\n`)
 
   let totalUpdated = 0
   let totalSkipped = 0
   let setsProcessed = 0
   const total = uniqueSets.length
 
-  for (const [catalogSetId, setName] of uniqueSets) {
+  for (const [, setName] of uniqueSets) {
     // Prøv sæt-navne-varianter mod ygoprodeck
     // 1. Nøjagtigt navn, 2. Strip parenteser som "(2020 Date Reprint)", 3. Afkort ved " -"
     const namesToTry = [
@@ -58,9 +58,10 @@ async function run() {
     ].filter((v, i, arr) => v && arr.indexOf(v) === i)           // unikke, ikke-tomme
 
     let data = null
+    let matchedYgoName = null
     for (const name of namesToTry) {
       data = await ygoprodFetch(`${BASE}/cardinfo.php?cardset=${encodeURIComponent(name)}`)
-      if (data?.data?.length) break
+      if (data?.data?.length) { matchedYgoName = name; break }
       await sleep(200)
     }
 
@@ -71,14 +72,14 @@ async function run() {
       continue
     }
 
-    // Byg map: normalized card number → ygoprodeck image URL
+    // Byg map: kortnummer → ygoprodeck image URL
+    // Bruger det matchede ygoprodeck sætnavn (matchedYgoName), ikke vores DB-navn
     const numToImage = new Map()
     for (const c of data.data) {
       const img = c.card_images?.[0]?.image_url
       if (!img) continue
-      // Ygoprodeck kortets sæt-specifikke nummer
       for (const setEntry of c.card_sets || []) {
-        if (setEntry.set_name?.toLowerCase() === setName.toLowerCase()) {
+        if (setEntry.set_name?.toLowerCase() === matchedYgoName.toLowerCase()) {
           const setCode = setEntry.set_code?.toLowerCase()
           if (setCode) {
             numToImage.set(setCode, img)
@@ -90,9 +91,9 @@ async function run() {
 
     if (!numToImage.size) { setsProcessed++; continue }
 
-    // Hent vores catalog-kort for dette sæt
+    // Hent vores catalog-kort for dette sæt (kun dem der mangler phash)
     const catalogCards = await dbSelect('card_catalog',
-      `game=eq.yugioh&set_id=eq.${encodeURIComponent(catalogSetId)}&select=id,number,image_url`)
+      `game=eq.yugioh&set_name=eq.${encodeURIComponent(setName)}&phash_art=is.null&select=id,number,image_url`)
 
     for (const card of catalogCards) {
       if (!card.image_url?.includes('tcgplayer.com')) { totalSkipped++; continue }
@@ -112,11 +113,11 @@ async function run() {
     await sleep(200)
   }
 
-  const broken = await dbCount('card_catalog', `game=eq.yugioh&image_url=like.*tcgplayer.com*`)
+  const broken = await dbCount('card_catalog', `game=eq.yugioh&phash_art=is.null&image_url=not.is.null`)
   console.log(`\n\n✅ Færdig!`)
   console.log(`   Image URLs opdateret: ${totalUpdated}`)
-  console.log(`   Stadig TCGPlayer:     ${broken}`)
-  console.log(`\n➡  Kør nu: node scripts/backfill-phash-only.js yugioh`)
+  console.log(`   Stadig uden phash:    ${broken}`)
+  console.log(`\n➡  Kør nu: node scripts/backfill-artwork-phash.js yugioh`)
 }
 
 run().catch(err => { console.error(err); process.exit(1) })
