@@ -141,56 +141,30 @@ async function fetchDetails(ids) {
   return r.ok ? r.json() : []
 }
 
-async function fetchByNumber(game, num, setTotal, isCode) {
-  if (!num) return { exact: new Set(), numberOnly: new Set() }
-
-  if (isCode) {
-    // Alfanumerisk kode (YGO/DBS/OnePiece): præcis kode-match
-    // ≤10 = rarity-varianter af samme kort → exact; >10 = for bredt → numberOnly
-    const r = await fetch(
-      `${SUPABASE_URL}/rest/v1/card_catalog?game=eq.${game}&number=eq.${encodeURIComponent(num)}&select=id&limit=15`,
-      { headers: sbh() }
-    )
-    const rows = r.ok ? await r.json() : []
-    if (rows.length >= 1 && rows.length <= 10) return { exact: new Set(rows.map(c => c.id)), numberOnly: new Set() }
-    if (rows.length > 10)                      return { exact: new Set(),                    numberOnly: new Set(rows.map(c => c.id)) }
-    return { exact: new Set(), numberOnly: new Set() }
-  }
-
-  if (setTotal) {
-    // Pokemon/MTG/Lorcana: number + sætstørrelse identificerer sættet præcist
-    const rpc = await fetch(`${SUPABASE_URL}/rest/v1/rpc/match_cards_number_setsize`, {
-      method:  'POST',
-      headers: sbh(),
-      body:    JSON.stringify({ p_game: game, p_number: num, p_set_total: setTotal }),
-    })
-    const exactRows = rpc.ok ? await rpc.json() : []
-    if (exactRows.length > 0) return { exact: new Set(exactRows.map(c => c.id)), numberOnly: new Set() }
-  }
-
-  // Nummer-only fallback (mange kort deler nummer på tværs af sæt)
-  const r = await fetch(
-    `${SUPABASE_URL}/rest/v1/card_catalog?game=eq.${game}&number=eq.${encodeURIComponent(num)}&select=id&limit=30`,
-    { headers: sbh() }
-  )
-  const rows = r.ok ? await r.json() : []
-  return { exact: new Set(), numberOnly: new Set(rows.map(c => c.id)) }
+// Parse et korts number-felt: "004/102" → {num:"4", total:102}; "4" → {num:"4", total:null}
+function parseCardNum(s) {
+  if (s == null) return { num: null, total: null, raw: '' }
+  const str = String(s).toUpperCase()
+  const m = str.match(/(\d{1,4})\s*\/\s*(\d{1,4})/)
+  if (m) return { num: String(parseInt(m[1], 10)), total: parseInt(m[2], 10), raw: str }
+  const bare = str.match(/(\d{1,4})/)
+  return { num: bare ? String(parseInt(bare[1], 10)) : null, total: null, raw: str }
 }
 
-function toCandidate(card, similarity) {
-  return {
-    id:           card.id,
-    name:         card.name         || null,
-    number:       card.number       || null,
-    set_id:       card.set_id       || null,
-    set_name:     card.set_name     || null,
-    rarity:       card.rarity       || null,
-    finish_types: card.finish_types || ['Normal'],
-    image_url:    card.image_url    || null,
-    game:         card.game,
-    similarity:   parseFloat(similarity.toFixed(4)),
-    _clip:        0,
+// OCR forfiner CLIP: boost en kandidat hvis dens EGET nummer matcher OCR. Kandidatens
+// number-felt ("004/102") indeholder både nummer OG total → robust mod katalog-bred
+// RPC's LIMIT/tolerance-problemer og mod OCR-misreads (en forkert OCR booster bare intet).
+function numberBonus(candNumber, ocr) {
+  if (!ocr?.number) return 0
+  const cand = parseCardNum(candNumber)
+  if (ocr.isCode) {
+    const a = cand.raw.replace(/[^A-Z0-9]/g, '')
+    const b = String(ocr.number).toUpperCase().replace(/[^A-Z0-9]/g, '')
+    return a && b && a === b ? 0.55 : 0
   }
+  if (cand.num == null || cand.num !== String(ocr.number)) return 0
+  if (ocr.setTotal && cand.total) return cand.total === ocr.setTotal ? 0.55 : 0.12  // total skelner base vs base2
+  return 0.30
 }
 
 // ─── Handler ───────────────────────────────────────────────────────────────
@@ -267,87 +241,17 @@ export default async function handler(req, res) {
   const serverPhash   = await computePhash(normalizedBuf)
   const uploadedPhash = serverPhash ?? (typeof incomingPhash === 'string' && incomingPhash.length === 16 ? incomingPhash : null)
 
-  // ── Processér OCR-resultat ────────────────────────────────────────────────
+  // ── OCR-resultat ──────────────────────────────────────────────────────────
+  // OCR OVERSKRIVER IKKE CLIP. Den bruges som per-kandidat number-bonus i scoringen
+  // nedenfor (numberBonus): CLIP finder det rigtige kort visuelt, OCR-nummeret vælger
+  // det rigtige TRYK blandt kandidaterne. Robust mod OCR-misreads og set-total-kollisioner.
   const ocrNum      = ocrResult?.number   ?? null
   const ocrSetTotal = ocrResult?.setTotal ?? null
-  const ocrIsCode   = ocrResult?.isCode   ?? false
-  let exactIds  = new Set()
-  let numberIds = new Set()
 
-  if (ocrNum) {
-    const found = await fetchByNumber(safeGame, ocrNum, ocrSetTotal, ocrIsCode)
-    exactIds  = found.exact
-    numberIds = found.numberOnly
-  }
-
-  // ── FAST PATH: OCR giver ét entydigt kort ──────────────────────────────────
-  // Pokemon 123/165, MTG 45/280, Lorcana 12/204: sætstørrelsen identificerer sættet.
-  // Kortets OCR-nummer identificerer dermed kortet 100%.
-  if (exactIds.size === 1) {
-    const [directId] = exactIds
-    const [card] = await fetchDetails([directId])
-    if (card) {
-      return res.status(200).json({
-        candidates:  [toCandidate(card, 0.99)],
-        confidence:  'high',
-        best:        toCandidate(card, 0.99),
-        ocr:         { number: ocrNum, setTotal: ocrSetTotal },
-        method:      'ocr-direct',
-        meta:        { game: safeGame, clip: false, pool: 1 },
-      })
-    }
-  }
-
-  // ── RARITY PATH: OCR giver 2-10 varianter (samme kort, forskellig sjældenhed) ──
-  // YGO BLVO-EN042 kan eksistere i 8 rarities — CLIP + phash vælger den rigtige.
-  // DBS, One Piece alt-arts, Pokemon reverse-holo varianter.
-  if (exactIds.size >= 2 && exactIds.size <= 10) {
-    const rarityCards = await fetchDetails([...exactIds])
-
-    let best = null
-    let bestSim = 0
-
-    // Forsøg 1: CLIP rangerer rarities (foil-border → anderledes embedding)
-    if (clipResultsRaw && clipResultsRaw.length > 0) {
-      const inPool = clipResultsRaw.filter(c => exactIds.has(c.id))
-      if (inPool.length > 0) {
-        best    = rarityCards.find(c => c.id === inPool[0].id) ?? null
-        bestSim = inPool[0].similarity ?? 0.90
-      }
-    }
-
-    // Forsøg 2: phash skelner rarity (common border vs holofoil border)
-    if (!best && uploadedPhash) {
-      const sorted = rarityCards
-        .map(c => ({ c, dist: hammingDist(uploadedPhash, c.phash) }))
-        .sort((a, b) => a.dist - b.dist)
-      if (sorted.length > 0) { best = sorted[0].c; bestSim = 0.88 }
-    }
-
-    // Fallback: første rarity
-    if (!best) { best = rarityCards[0]; bestSim = 0.85 }
-
-    const candidates = rarityCards.map(c =>
-      ({ ...toCandidate(c, c.id === best.id ? bestSim : bestSim - 0.08), _clip: 0 })
-    )
-
-    return res.status(200).json({
-      candidates,
-      confidence: 'high',
-      best:       { ...toCandidate(best, bestSim), _clip: 0 },
-      ocr:        { number: ocrNum, setTotal: ocrSetTotal },
-      method:     'ocr-rarity',
-      meta:       { game: safeGame, clip: !!(clipResultsRaw?.length), pool: rarityCards.length },
-    })
-  }
-
-  // ── STANDARD PATH: CLIP + phash + OCR bonus ──────────────────────────────
-  // Bruges når OCR fejler eller giver for bredt et match (>10 kort).
-  //
-  // Fallback-hierarki (IVFFlat er sparse for kamerafoto-embeddings):
-  //   1. CLIP pool ≥ 5  → brug CLIP som primær (clip*0.65 + phash*0.25)
-  //   2. CLIP pool 1-4  → CLIP er for sparsom; supplér med phash-pool
-  //   3. Ingen CLIP      → ren phash-only
+  // ── SCORING: CLIP + phash + OCR number-bonus ─────────────────────────────
+  // Fallback-hierarki:
+  //   1. CLIP pool ≥ 5  → brug CLIP som primær (clip*0.65 + phash*0.25 + number)
+  //   2. Ingen brugbar CLIP → ren phash-only + number
   const MIN_CLIP_POOL = 5
   let usedClip    = false
   let clipResults = (clipResultsRaw && clipResultsRaw.length >= MIN_CLIP_POOL) ? clipResultsRaw : null
@@ -358,6 +262,7 @@ export default async function handler(req, res) {
   if (usedClip) {
     candidatePool = clipResults.map(c => ({
       id:        c.id,
+      number:    c.number ?? null,
       clipSim:   typeof c.similarity === 'number' ? c.similarity : 0,
       phashDist: uploadedPhash ? hammingDist(uploadedPhash, c.phash) : null,
     }))
@@ -367,7 +272,7 @@ export default async function handler(req, res) {
       console.log('[scan] clip pool sparse (' + clipResultsRaw.length + '), fallback til phash')
     }
     const phashHits = uploadedPhash ? await phashSearch(safeGame, uploadedPhash) : []
-    candidatePool = phashHits.map(c => ({ id: c.id, clipSim: 0, phashDist: c.dist }))
+    candidatePool = phashHits.map(c => ({ id: c.id, number: c.number ?? null, clipSim: 0, phashDist: c.dist }))
   }
 
   if (!candidatePool.length) {
@@ -379,12 +284,12 @@ export default async function handler(req, res) {
     })
   }
 
-  // Kombineret scoring med OCR-bonus
+  // Kombineret scoring: CLIP + phash + per-kandidat OCR number-bonus
   const w = PHASH_SCORE_WEIGHTS[safeGame] ?? PHASH_SCORE_WEIGHTS.default
   const scored = candidatePool.map(c => {
     const clip   = c.clipSim
     const ph     = c.phashDist !== null ? 1 - c.phashDist / 64 : 0
-    const number = exactIds.has(c.id) ? 0.50 : numberIds.has(c.id) ? 0.20 : 0
+    const number = numberBonus(c.number, ocrResult)
     const total  = usedClip
       ? clip * w.clip + ph * w.phash + number
       : ph * 0.75 + number
@@ -406,7 +311,7 @@ export default async function handler(req, res) {
       finish_types: card.finish_types || ['Normal'],
       image_url:    card.image_url    || null,
       game:         card.game         || safeGame,
-      similarity:   parseFloat(s.total.toFixed(4)),
+      similarity:   parseFloat(Math.min(s.total, 0.99).toFixed(4)),
       _clip:        parseFloat(s.clipSim.toFixed(4)),
     }
   })
