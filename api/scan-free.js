@@ -13,7 +13,6 @@
  */
 
 import sharp     from 'sharp'
-import Tesseract from 'tesseract.js'
 
 const SUPABASE_URL  = process.env.SUPABASE_URL
 const SUPABASE_KEY  = process.env.SUPABASE_SERVICE_KEY
@@ -54,72 +53,10 @@ async function computePhash(buf) {
   } catch { return null }
 }
 
-// ─── OCR ──────────────────────────────────────────────────────────────────
-let _ocrWorker = null
-
-async function getOcrWorker() {
-  if (_ocrWorker) return _ocrWorker
-  _ocrWorker = await Tesseract.createWorker('eng', 1, { logger: () => {} })
-  await _ocrWorker.setParameters({
-    tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789/-',
-    tessedit_pageseg_mode:   '7',
-  })
-  return _ocrWorker
-}
-
-function parseOcrText(raw, game) {
-  // Yu-Gi-Oh / Dragon Ball / One Piece: alfanumerisk kode  f.eks. BLVO-EN042, BT1-001, OP01-001
-  const code = raw.match(/([A-Z]{1,6}\d{0,3}-[A-Z]{0,2}\d{2,4})/)
-  if (code) return { number: code[1], setTotal: null, isCode: true }
-
-  // Pokemon / MTG / Lorcana: numerisk format  f.eks. 123/165
-  const slash = raw.match(/(\d{1,4})\/(\d{1,4})/)
-  if (slash) return {
-    number:   slash[1].replace(/^0+(?=\d)/, '') || '0',
-    setTotal: parseInt(slash[2], 10),
-    isCode:   false,
-  }
-
-  // Fallback: nøgent tal
-  const num = raw.match(/\b(\d{1,4})\b/)
-  if (num) return {
-    number:   num[1].replace(/^0+(?=\d)/, '') || '0',
-    setTotal: null,
-    isCode:   false,
-  }
-
-  return { number: null, setTotal: null, isCode: false }
-}
-
-// OCR-zone: bundlinjen af kortet (ca. 7.5 % af kortets højde)
-// Samme zone dækker alle spil — koden/nummeret sidder altid i bunden
-async function ocrCardNumber(imgBuf, game) {
-  let ocrTarget = imgBuf
-  try {
-    const { width, height } = await sharp(imgBuf).metadata()
-    const zone = {
-      left:   Math.floor(width  * 0.05),
-      top:    Math.floor(height * 0.860),
-      width:  Math.floor(width  * 0.90),
-      height: Math.floor(height * 0.080),
-    }
-    ocrTarget = await sharp(imgBuf)
-      .extract(zone)
-      .resize({ width: 800 })
-      .grayscale()
-      .normalize()
-      .sharpen({ sigma: 1.5 })
-      .toBuffer()
-  } catch { /* sharp fejlede → OCR på fuldt billede */ }
-
-  const w = await getOcrWorker()
-  const { data } = await w.recognize(ocrTarget)
-  const raw = data.text.replace(/\s+/g, '').toUpperCase()
-  return parseOcrText(raw, game)
-}
-
-// ─── Railway embedding service ────────────────────────────────────────────
-async function getServerEmbedding(base64Image) {
+// ─── Railway embedding + OCR service ──────────────────────────────────────
+// OCR kører nu på Railway (varm Tesseract-worker, ingen Vercel cold-start).
+// Se packages/scanner/card-ocr.js + railway-server.js.
+async function getServerEmbedding(base64Image, game) {
   if (!EMBED_URL) { console.error('[embed] EMBED_SERVICE_URL not set'); return null }
   const attempt = async () => {
     const r = await fetch(`${EMBED_URL}/embed`, {
@@ -128,13 +65,13 @@ async function getServerEmbedding(base64Image) {
         'Content-Type': 'application/json',
         ...(EMBED_SECRET ? { Authorization: `Bearer ${EMBED_SECRET}` } : {}),
       },
-      body:   JSON.stringify({ image: `data:image/jpeg;base64,${base64Image}` }),
+      body:   JSON.stringify({ image: `data:image/jpeg;base64,${base64Image}`, game }),
       signal: AbortSignal.timeout(18000),
     })
     if (!r.ok) throw new Error(`Railway ${r.status}`)
-    const { embedding } = await r.json()
-    if (!Array.isArray(embedding) || embedding.length !== 512) throw new Error('bad embedding shape')
-    return embedding
+    const data = await r.json()
+    if (!Array.isArray(data.embedding) || data.embedding.length !== 512) throw new Error('bad embedding shape')
+    return { embedding: data.embedding, ocr: data.ocr ?? null }
   }
   try {
     return await attempt()
@@ -292,21 +229,22 @@ export default async function handler(req, res) {
   // VIGTIGT: bevar aspect ratio (fit:inside) — IKKE stretch. Railway/CLIP-processoren
   // laver selv resize(224)+center-crop, præcis som backfill. Stretch gav cosine 0.85
   // mod kataloget (skulle være ~1.0) → forkerte matches.
+  // 800px giver nok opløsning til at Railway-OCR kan læse kortnummeret (embedding nedskalerer selv).
   let clipInputBase64 = null
   try {
-    const thumb = await sharp(normalizedBuf).resize(384, 384, { fit: 'inside' }).jpeg({ quality: 90 }).toBuffer()
+    const thumb = await sharp(normalizedBuf).resize(800, 800, { fit: 'inside' }).jpeg({ quality: 85 }).toBuffer()
     clipInputBase64 = thumb.toString('base64')
   } catch { clipInputBase64 = normalizedBuf.toString('base64') }
 
+  // Ét VARMT Railway-kald returnerer BÅDE embedding og OCR. Erstatter Vercels
+  // cold-start-Tesseract (som tog ~11s → "server error"). Nu ~1-2s.
   const scanDiag = { thumbLen: clipInputBase64?.length ?? 0, embedUrlOk: !!EMBED_URL }
   const _t0Rwy = Date.now()
-  const [railwayEmbedding, ocrResult] = await Promise.all([
-    getServerEmbedding(clipInputBase64).then(e => { scanDiag.railwayMs = Date.now() - _t0Rwy; scanDiag.railwayOk = !!e; return e }),
-    Promise.race([
-      ocrCardNumber(normalizedBuf, safeGame),
-      new Promise(resolve => setTimeout(() => resolve(null), 12000)),
-    ]).catch(() => null),
-  ])
+  const railway = await getServerEmbedding(clipInputBase64, safeGame)
+  scanDiag.railwayMs = Date.now() - _t0Rwy
+  scanDiag.railwayOk = !!railway?.embedding
+  const railwayEmbedding = railway?.embedding ?? null
+  const ocrResult = railway?.ocr ?? null
 
   const clientFallback = (clientEmbedding && Array.isArray(clientEmbedding) && clientEmbedding.length === 512)
     ? clientEmbedding : null

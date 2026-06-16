@@ -12,6 +12,7 @@
 
 import http from 'http'
 import { extractEmbedding } from './embedding-server.js'
+import { ocrCardNumber, getOcrWorker } from './card-ocr.js'
 
 const PORT   = process.env.PORT   || 3001
 const SECRET = process.env.EMBED_SECRET || ''
@@ -23,6 +24,10 @@ extractEmbedding(Buffer.alloc(1)).catch(() => {}).finally(() => {
   modelReady = true
   console.log('CLIP model ready')
 })
+
+// Pre-load OCR-worker ved startup (varm → ingen cold start pr. request)
+console.log('Loading OCR worker...')
+getOcrWorker().then(() => console.log('OCR worker ready')).catch(e => console.error('OCR preload failed:', e.message))
 
 function cors(res) {
   res.setHeader('Access-Control-Allow-Origin',  '*')
@@ -73,8 +78,12 @@ const server = http.createServer(async (req, res) => {
     const base64 = image.replace(/^data:image\/\w+;base64,/, '')
     const buffer = Buffer.from(base64, 'base64')
 
-    const embedding = await extractEmbedding(buffer)
-    return json(res, 200, { embedding })
+    // Embedding + OCR i parallel — begge fra samme billede, begge varme
+    const [embedding, ocr] = await Promise.all([
+      extractEmbedding(buffer),
+      ocrCardNumber(buffer, body.game || 'pokemon').catch(() => null),
+    ])
+    return json(res, 200, { embedding, ocr })
   } catch (err) {
     console.error('Embed error:', err.message)
     return json(res, 500, { error: 'Embedding failed' })
