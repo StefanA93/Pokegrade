@@ -117,7 +117,7 @@ async function phashSearch(game, uploadedHash) {
   let offset = 0
   while (true) {
     const r = await fetch(
-      `${SUPABASE_URL}/rest/v1/card_catalog?game=eq.${game}&phash=not.is.null&select=id,phash&limit=1000&offset=${offset}`,
+      `${SUPABASE_URL}/rest/v1/card_catalog?game=eq.${game}&phash=not.is.null&number=not.like.product-*&select=id,number,phash&limit=1000&offset=${offset}`,
       { headers: sbh() }
     )
     if (!r.ok) break
@@ -127,7 +127,8 @@ async function phashSearch(game, uploadedHash) {
     offset += 1000
   }
   return all
-    .map(c => ({ id: c.id, dist: hammingDist(uploadedHash, c.phash) }))
+    .filter(c => !String(c.id ?? '').includes('product'))   // produkter forurener ranking — også i phash-stien
+    .map(c => ({ id: c.id, number: c.number ?? null, dist: hammingDist(uploadedHash, c.phash) }))
     .sort((a, b) => a.dist - b.dist)
     .slice(0, 50)
 }
