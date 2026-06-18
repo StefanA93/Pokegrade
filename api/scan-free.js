@@ -167,6 +167,33 @@ function numberBonus(candNumber, ocr) {
   return 0.30
 }
 
+// Auto-crop: find kortets bbox via saturation (kort er farverigt; baggrund typisk grå/hvid/umættet)
+// og beskær tæt, så kortet fylder rammen som i kataloget. Ægte fotos har baggrund → uden crop ser
+// CLIP kortet i forkert skala → forkerte matches (bevist på eBay-fotos: produkt → korrekt kort).
+// No-op hvis kortet allerede fylder rammen (clean renders) eller baggrunden er for mættet (busy).
+async function autoCropCard(buf) {
+  try {
+    const W = 120
+    const { data, info } = await sharp(buf).resize(W, W, { fit: 'fill' }).raw().toBuffer({ resolveWithObject: true })
+    const w = info.width, h = info.height, ch = info.channels
+    let minx = w, miny = h, maxx = 0, maxy = 0, cnt = 0
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const i = (y * w + x) * ch
+      const mx = Math.max(data[i], data[i + 1], data[i + 2]), mn = Math.min(data[i], data[i + 1], data[i + 2])
+      const sat = mx === 0 ? 0 : (mx - mn) / mx
+      if (sat > 0.28) { cnt++; if (x < minx) minx = x; if (x > maxx) maxx = x; if (y < miny) miny = y; if (y > maxy) maxy = y }
+    }
+    const bw = maxx - minx, bh = maxy - miny, frac = (bw * bh) / (w * h)
+    if (cnt < 80 || frac > 0.92 || bw < w * 0.25 || bh < h * 0.25) return buf   // fylder allerede / busy / støj
+    const meta = await sharp(buf).metadata(), pad = 0.02
+    const L = Math.max(0, Math.floor((minx / w - pad) * meta.width))
+    const T = Math.max(0, Math.floor((miny / h - pad) * meta.height))
+    const R = Math.min(meta.width, Math.ceil((maxx / w + pad) * meta.width))
+    const B = Math.min(meta.height, Math.ceil((maxy / h + pad) * meta.height))
+    return await sharp(buf).extract({ left: L, top: T, width: R - L, height: B - T }).toBuffer()
+  } catch { return buf }
+}
+
 // ─── Handler ───────────────────────────────────────────────────────────────
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') {
@@ -204,9 +231,11 @@ export default async function handler(req, res) {
   // laver selv resize(224)+center-crop, præcis som backfill. Stretch gav cosine 0.85
   // mod kataloget (skulle være ~1.0) → forkerte matches.
   // 800px giver nok opløsning til at Railway-OCR kan læse kortnummeret (embedding nedskalerer selv).
+  // Auto-crop kortet ud af baggrunden FØR embedding/OCR — så kortet fylder rammen som i kataloget.
   let clipInputBase64 = null
   try {
-    const thumb = await sharp(normalizedBuf).resize(800, 800, { fit: 'inside' }).jpeg({ quality: 85 }).toBuffer()
+    const cropped = await autoCropCard(normalizedBuf)
+    const thumb = await sharp(cropped).resize(800, 800, { fit: 'inside' }).jpeg({ quality: 85 }).toBuffer()
     clipInputBase64 = thumb.toString('base64')
   } catch { clipInputBase64 = normalizedBuf.toString('base64') }
 
@@ -232,10 +261,10 @@ export default async function handler(req, res) {
     scanDiag.clipStatus = Array.isArray(_clipRaw) ? _clipRaw.length : (_clipRaw === null ? 'null' : 'other')
     clipAll = _clipRaw
   }
-  // Filtrer produkter (blister-packs, tins, booster-boxes) fra CLIP — de forurener ranking
-  const clipResultsRaw = clipAll
-    ? clipAll.filter(c => !String(c.id ?? '').includes('product'))
-    : null
+  // Filtrer produkter (blister-packs, tins, booster-boxes) fra CLIP — de forurener ranking.
+  // Tjek BÅDE id og number: nogle produkter har 'product-NNN' i number-feltet, ikke i id.
+  const isProduct = c => String(c.id ?? '').includes('product') || String(c.number ?? '').startsWith('product')
+  const clipResultsRaw = clipAll ? clipAll.filter(c => !isProduct(c)) : null
 
   // phash (hurtigt, kør efter parallelfasen)
   const serverPhash   = await computePhash(normalizedBuf)
