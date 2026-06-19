@@ -168,35 +168,38 @@ function numberBonus(candNumber, ocr) {
   return 0.30
 }
 
-// Auto-crop (v2): estimér baggrundsfarve fra de 4 hjørner, masker pixels der AFVIGER fra den
-// (= kortet), og beskær via række/kolonne-profiler. Håndterer ensartede baggrunde i ENHVER farve
-// (grå/hvid/sort/farvet bord) — modsat saturation (v1) der fejlede på farvede baggrunde.
-// Ægte fotos har baggrund → uden crop ser CLIP kortet i forkert skala → forkerte matches.
-// No-op hvis kortet allerede fylder rammen (clean renders → hjørner = kort → intet afviger nok).
+// Auto-crop (v3): find kortets bbox via GRADIENT-PROJEKTION i stedet for farve. Kortets indre
+// (tekst/art/border) er kant-tæt; baggrunds-margener er kant-fattige → trim de yderste rækker/
+// kolonner hvor gradient-massen falder under tærsklen. Robust mod teksturerede/FARVEDE baggrunde
+// (v2's farve-heuristik fejlede på fx lilla bord der varierede nok til at tælle som "kort").
+// Konfidens-guard: cropper KUN når den trimmede margen er klart kant-fattigere end kort-kernen
+// (ellers er billedet kant-tæt overalt = clean render el. busy bg → no-op, sikkert).
+// Generøs bund-padding så nummer-båndet aldrig skæres (OCR-zonen ligger der).
 async function autoCropCard(buf) {
   try {
-    const W = 140
-    const { data, info } = await sharp(buf).resize(W, W, { fit: 'fill' }).raw().toBuffer({ resolveWithObject: true })
-    const w = info.width, h = info.height, ch = info.channels
-    const at = (x, y) => { const i = (y * w + x) * ch; return [data[i], data[i + 1], data[i + 2]] }
-    let br = 0, bg = 0, bb = 0, bn = 0   // baggrundsfarve = gennemsnit af 4 hjørne-patches
-    for (const [cx, cy] of [[3, 3], [w - 4, 3], [3, h - 4], [w - 4, h - 4]])
-      for (let dy = -3; dy < 3; dy++) for (let dx = -3; dx < 3; dx++) { const [r, g, b] = at(cx + dx, cy + dy); br += r; bg += g; bb += b; bn++ }
-    br /= bn; bg /= bn; bb /= bn
-    const rowP = new Array(h).fill(0), colP = new Array(w).fill(0)
-    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-      const [r, g, b] = at(x, y)
-      if (Math.abs(r - br) + Math.abs(g - bg) + Math.abs(b - bb) > 60) { rowP[y]++; colP[x]++ }
+    const N = 256
+    const { data, info } = await sharp(buf).resize(N, N, { fit: 'fill' }).grayscale().blur(0.6).raw().toBuffer({ resolveWithObject: true })
+    const w = info.width, h = info.height, g = (x, y) => data[y * w + x]
+    const rowMass = new Array(h).fill(0), colMass = new Array(w).fill(0)
+    for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
+      const m = Math.abs(g(x + 1, y) - g(x - 1, y)) + Math.abs(g(x, y + 1) - g(x, y - 1)); rowMass[y] += m; colMass[x] += m
     }
-    const band = (prof, len) => { const th = len * 0.18; let a = 0, b = len - 1; while (a < len && prof[a] < th) a++; while (b > a && prof[b] < th) b--; return [a, b] }
-    const [ry0, ry1] = band(rowP, w), [cx0, cx1] = band(colP, h)
-    const bw = cx1 - cx0, bh = ry1 - ry0, frac = (bw * bh) / (w * h)
-    if (bw < w * 0.2 || bh < h * 0.2 || frac > 0.55) return buf   // kort fylder allerede ≥55% → ingen crop (undgå at skære clean renders)
-    const meta = await sharp(buf).metadata(), pad = 0.02
-    const L = Math.max(0, Math.floor((cx0 / w - pad) * meta.width))
-    const T = Math.max(0, Math.floor((ry0 / h - pad) * meta.height))
-    const R = Math.min(meta.width, Math.ceil((cx1 / w + pad) * meta.width))
-    const B = Math.min(meta.height, Math.ceil((ry1 / h + pad) * meta.height))
+    const smooth = p => p.map((_, i) => { let s = 0, n = 0; for (let k = -2; k <= 2; k++) { const j = i + k; if (j >= 0 && j < p.length) { s += p[j]; n++ } } return s / n })
+    const rM = smooth(rowMass), cM = smooth(colMass)
+    const median = a => { const s = [...a].sort((x, y) => x - y); return s[Math.floor(s.length / 2)] }
+    const extent = (p, th) => { let a = 0, b = p.length - 1; while (a < p.length && p[a] < th) a++; while (b > a && p[b] < th) b--; return [a, b] }
+    const [top, bot] = extent(rM, median(rM) * 0.40), [lft, rgt] = extent(cM, median(cM) * 0.40)
+    const bw = rgt - lft, bh = bot - top, frac = (bw * bh) / (w * h)
+    const coreMean = rM.slice(top, bot + 1).reduce((s, v) => s + v, 0) / Math.max(1, bh)
+    const marginRows = [...rM.slice(0, top), ...rM.slice(bot + 1)]
+    const marginMean = marginRows.length ? marginRows.reduce((s, v) => s + v, 0) / marginRows.length : coreMean
+    // Guards: kort fylder rammen (clean) ELLER detektion fejlede ELLER ingen klar kant-fattig margen → no-op
+    if (frac > 0.86 || bw < w * 0.35 || bh < h * 0.35 || marginMean >= coreMean * 0.55) return buf
+    const meta = await sharp(buf).metadata()
+    const L = Math.max(0, Math.floor((lft / w - 0.015) * meta.width))
+    const T = Math.max(0, Math.floor((top / h - 0.02) * meta.height))
+    const R = Math.min(meta.width, Math.ceil((rgt / w + 0.015) * meta.width))
+    const B = Math.min(meta.height, Math.ceil((bot / h + 0.04) * meta.height))   // +4% bund: bevar nummer-båndet
     return await sharp(buf).extract({ left: L, top: T, width: R - L, height: B - T }).toBuffer()
   } catch { return buf }
 }
