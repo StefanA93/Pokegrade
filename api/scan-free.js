@@ -168,29 +168,35 @@ function numberBonus(candNumber, ocr) {
   return 0.30
 }
 
-// Auto-crop: find kortets bbox via saturation (kort er farverigt; baggrund typisk grå/hvid/umættet)
-// og beskær tæt, så kortet fylder rammen som i kataloget. Ægte fotos har baggrund → uden crop ser
-// CLIP kortet i forkert skala → forkerte matches (bevist på eBay-fotos: produkt → korrekt kort).
-// No-op hvis kortet allerede fylder rammen (clean renders) eller baggrunden er for mættet (busy).
+// Auto-crop (v2): estimér baggrundsfarve fra de 4 hjørner, masker pixels der AFVIGER fra den
+// (= kortet), og beskær via række/kolonne-profiler. Håndterer ensartede baggrunde i ENHVER farve
+// (grå/hvid/sort/farvet bord) — modsat saturation (v1) der fejlede på farvede baggrunde.
+// Ægte fotos har baggrund → uden crop ser CLIP kortet i forkert skala → forkerte matches.
+// No-op hvis kortet allerede fylder rammen (clean renders → hjørner = kort → intet afviger nok).
 async function autoCropCard(buf) {
   try {
-    const W = 120
+    const W = 140
     const { data, info } = await sharp(buf).resize(W, W, { fit: 'fill' }).raw().toBuffer({ resolveWithObject: true })
     const w = info.width, h = info.height, ch = info.channels
-    let minx = w, miny = h, maxx = 0, maxy = 0, cnt = 0
+    const at = (x, y) => { const i = (y * w + x) * ch; return [data[i], data[i + 1], data[i + 2]] }
+    let br = 0, bg = 0, bb = 0, bn = 0   // baggrundsfarve = gennemsnit af 4 hjørne-patches
+    for (const [cx, cy] of [[3, 3], [w - 4, 3], [3, h - 4], [w - 4, h - 4]])
+      for (let dy = -3; dy < 3; dy++) for (let dx = -3; dx < 3; dx++) { const [r, g, b] = at(cx + dx, cy + dy); br += r; bg += g; bb += b; bn++ }
+    br /= bn; bg /= bn; bb /= bn
+    const rowP = new Array(h).fill(0), colP = new Array(w).fill(0)
     for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-      const i = (y * w + x) * ch
-      const mx = Math.max(data[i], data[i + 1], data[i + 2]), mn = Math.min(data[i], data[i + 1], data[i + 2])
-      const sat = mx === 0 ? 0 : (mx - mn) / mx
-      if (sat > 0.28) { cnt++; if (x < minx) minx = x; if (x > maxx) maxx = x; if (y < miny) miny = y; if (y > maxy) maxy = y }
+      const [r, g, b] = at(x, y)
+      if (Math.abs(r - br) + Math.abs(g - bg) + Math.abs(b - bb) > 60) { rowP[y]++; colP[x]++ }
     }
-    const bw = maxx - minx, bh = maxy - miny, frac = (bw * bh) / (w * h)
-    if (cnt < 80 || frac > 0.92 || bw < w * 0.25 || bh < h * 0.25) return buf   // fylder allerede / busy / støj
+    const band = (prof, len) => { const th = len * 0.18; let a = 0, b = len - 1; while (a < len && prof[a] < th) a++; while (b > a && prof[b] < th) b--; return [a, b] }
+    const [ry0, ry1] = band(rowP, w), [cx0, cx1] = band(colP, h)
+    const bw = cx1 - cx0, bh = ry1 - ry0, frac = (bw * bh) / (w * h)
+    if (bw < w * 0.2 || bh < h * 0.2 || frac > 0.55) return buf   // kort fylder allerede ≥55% → ingen crop (undgå at skære clean renders)
     const meta = await sharp(buf).metadata(), pad = 0.02
-    const L = Math.max(0, Math.floor((minx / w - pad) * meta.width))
-    const T = Math.max(0, Math.floor((miny / h - pad) * meta.height))
-    const R = Math.min(meta.width, Math.ceil((maxx / w + pad) * meta.width))
-    const B = Math.min(meta.height, Math.ceil((maxy / h + pad) * meta.height))
+    const L = Math.max(0, Math.floor((cx0 / w - pad) * meta.width))
+    const T = Math.max(0, Math.floor((ry0 / h - pad) * meta.height))
+    const R = Math.min(meta.width, Math.ceil((cx1 / w + pad) * meta.width))
+    const B = Math.min(meta.height, Math.ceil((ry1 / h + pad) * meta.height))
     return await sharp(buf).extract({ left: L, top: T, width: R - L, height: B - T }).toBuffer()
   } catch { return buf }
 }
