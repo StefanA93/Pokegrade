@@ -125,6 +125,33 @@ async function nameSearch(game, ocrName) {
   return rows.filter(c => { const a = normName(c.name); return a && (a === b || a.includes(b) || b.includes(a)) })
 }
 
+// Cosine-similarity i JS (samme mål som match_cards' 1-(embedding<=>query)) — til CLIP-ranking
+// af navn-injicerede kort der ligger UDEN FOR CLIP-poolen (top-30).
+function cosineSim(a, b) {
+  if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return 0
+  let dot = 0, na = 0, nb = 0
+  for (let i = 0; i < a.length; i++) { dot += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i] }
+  const d = Math.sqrt(na) * Math.sqrt(nb)
+  return d ? dot / d : 0
+}
+
+// Hent embeddings for specifikke id'er (navn-injicerede kort) → så vi kan give dem en ægte
+// visuel score i stedet for clipSim=0. Distinkt-art-rarities (SIR/IR/secret) vinder så blandt
+// samme-navn-tryk; same-art (reverse/promo) forbliver tæt → number/phash afgør.
+async function fetchEmbeddings(ids) {
+  if (!ids.length) return {}
+  const r = await fetch(
+    `${SUPABASE_URL}/rest/v1/card_catalog?id=in.(${ids.map(id => `"${id}"`).join(',')})&select=id,embedding`,
+    { headers: sbh() })
+  if (!r.ok) return {}
+  const out = {}
+  for (const row of await r.json()) {
+    if (!row.embedding) continue
+    out[row.id] = typeof row.embedding === 'string' ? JSON.parse(row.embedding) : row.embedding
+  }
+  return out
+}
+
 // Per-kandidat navn-bonus (analog til numberBonus): boost et kort hvis dets navn matcher OCR-navnet.
 // Krydsvalidering: navn-match (+0.45) + nummer-match (numberBonus +0.55) → ~1.0 → vinder sikkert.
 function nameBonus(candName, ocrName) {
@@ -375,13 +402,17 @@ export default async function handler(req, res) {
   // henter alle tryk af det OCR-læste navn ind; numberBonus vælger så det rigtige tryk (krydsvalidering).
   if (ocrName) {
     const existing = new Set(candidatePool.map(c => c.id))
-    const nameHits = await nameSearch(safeGame, ocrName).catch(() => [])
+    const nameHits = (await nameSearch(safeGame, ocrName).catch(() => [])).filter(h => !existing.has(h.id))
+    // CLIP-rank de injicerede kort: ægte cosine mod scan-embeddingen (ikke clipSim=0). Distinkt-art-
+    // rarities (SIR/IR/secret) vinder så visuelt blandt samme-navn-tryk; numberBonus afgør same-art.
+    const embMap = activeEmbedding ? await fetchEmbeddings(nameHits.map(h => h.id)).catch(() => ({})) : {}
     for (const hch of nameHits) {
-      if (existing.has(hch.id)) continue
       existing.add(hch.id)
+      const emb = embMap[hch.id]
       candidatePool.push({
         id: hch.id, name: hch.name ?? null, number: hch.number ?? null, phash: hch.phash ?? null,
-        clipSim: 0, phashDist: (uploadedPhash && hch.phash) ? hammingDist(uploadedPhash, hch.phash) : null,
+        clipSim: emb ? cosineSim(activeEmbedding, emb) : 0,
+        phashDist: (uploadedPhash && hch.phash) ? hammingDist(uploadedPhash, hch.phash) : null,
       })
     }
     scanDiag.nameHits = nameHits.length
