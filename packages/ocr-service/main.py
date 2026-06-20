@@ -11,15 +11,25 @@ PaddleOCR læser hele kortet: number+setTotal (entydig nøgle) OG kortnavnet (ro
 på holo-kort hvor det bittesmå nummer fejler). Tesseract/TrOCR kunne ingen af delene.
 Stabil stak: paddlepaddle==2.6.2 + paddleocr==2.9.1 (3.x har oneDNN/PIR-crash på nogle CPU'er).
 """
+import os
+# Begræns RAM-peak FØR paddle/numpy importeres: 1 tråd pr. math-lib → markant lavere hukommelse
+# (PaddleOCR-inference OOM-dræbte containeren på trial-instansen ved samtidige tråde).
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+
 import base64
 import io
 import re
-import os
 
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel
 from PIL import Image, ImageOps
 import numpy as np
+
+# Maks billed-dimension før OCR — beskytter mod store-billede memory-spikes (scan-free sender
+# 800px, men en defensiv cap forhindrer OOM hvis et større billede slipper igennem).
+MAX_DIM = 1100
 
 SECRET = os.environ.get("EMBED_SECRET", "")
 VALID_GAMES = {"pokemon", "pokemonjp", "mtg", "yugioh", "onepiece", "lorcana", "dragonball", "riftbound"}
@@ -39,7 +49,10 @@ def get_ocr():
     global _ocr, _ready
     if _ocr is None:
         from paddleocr import PaddleOCR
-        _ocr = PaddleOCR(use_angle_cls=True, lang="en", show_log=False)
+        # use_angle_cls=False: drop angle-classifier-modellen (kort er opretstående) → mindre RAM.
+        # enable_mkldnn=False + 1 tråd: lavere hukommelses-peak under inference.
+        _ocr = PaddleOCR(use_angle_cls=False, lang="en", show_log=False,
+                         enable_mkldnn=False, cpu_threads=1)
         _ready = True
     return _ocr
 
@@ -50,7 +63,7 @@ def _warm():
     try:
         get_ocr()
         # kør ét dummy-kald så vægtene er varme
-        _ocr.ocr(np.zeros((32, 64, 3), dtype=np.uint8), cls=False)
+        _ocr.ocr(np.zeros((32, 64, 3), dtype=np.uint8))
     except Exception as e:
         print("OCR warmup failed:", e)
 
@@ -62,11 +75,14 @@ class OcrReq(BaseModel):
 
 def _decode(data_url: str) -> Image.Image:
     b64 = re.sub(r"^data:image/\w+;base64,", "", data_url)
-    return Image.open(io.BytesIO(base64.b64decode(b64))).convert("RGB")
+    img = Image.open(io.BytesIO(base64.b64decode(b64))).convert("RGB")
+    if max(img.size) > MAX_DIM:   # defensiv cap mod store-billede OOM
+        img.thumbnail((MAX_DIM, MAX_DIM))
+    return img
 
 
 def _run(img: Image.Image) -> list[str]:
-    res = get_ocr().ocr(np.array(img), cls=True)
+    res = get_ocr().ocr(np.array(img))
     return [line[1][0] for page in (res or []) for line in (page or [])]
 
 
