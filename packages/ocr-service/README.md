@@ -11,7 +11,7 @@ Separat Railway-service der læser kortnummer + kortnavn fra et foto. Erstatter 
 ## Lokal kørsel
 ```bash
 py -3.12 -m pip install -r requirements.txt
-EMBED_SECRET=gd_embed_2024 py -3.12 -m uvicorn app:app --port 3002
+EMBED_SECRET=gd_embed_2024 py -3.12 -m uvicorn main:app --port 3002
 ```
 
 ## Railway-deploy
