@@ -31,3 +31,8 @@ num_zone_debug.png
 scripts/.progress-*.txt
 
 .env*.local
+
+_bench/
+_ocrdebug/
+__pycache__/
+*.pyc
