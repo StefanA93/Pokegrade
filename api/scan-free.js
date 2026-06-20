@@ -304,7 +304,9 @@ export default async function handler(req, res) {
 
   let normalizedBuf
   try {
-    normalizedBuf = await sharp(imgBuf).resize(900).jpeg({ quality: 90 }).toBuffer()
+    // 1300px: bevarer nok detalje til at OCR-servicen kan læse små 3-cifrede full-art-numre
+    // (IR/SIR). CLIP-thumben nedskaleres alligevel til 800 → uændret for CLIP.
+    normalizedBuf = await sharp(imgBuf).resize(1300).jpeg({ quality: 90 }).toBuffer()
   } catch { normalizedBuf = imgBuf }
 
   const matchCount = CLIP_MATCH_COUNT[safeGame] ?? CLIP_MATCH_COUNT.default
@@ -316,12 +318,15 @@ export default async function handler(req, res) {
   // mod kataloget (skulle være ~1.0) → forkerte matches.
   // 800px giver nok opløsning til at Railway-OCR kan læse kortnummeret (embedding nedskalerer selv).
   // Auto-crop kortet ud af baggrunden FØR embedding/OCR — så kortet fylder rammen som i kataloget.
+  // CLIP: 800px (processoren nedskalerer til 224). OCR: 1200px — små full-art-numre kræver
+  // højere opløsning (800px → nummeret tabes; 1100-1200px → læses). OCR-servicen capper selv til 1100.
   let clipInputBase64 = null
+  let ocrInputBase64  = null
   try {
     const cropped = await autoCropCard(normalizedBuf)
-    const thumb = await sharp(cropped).resize(800, 800, { fit: 'inside' }).jpeg({ quality: 85 }).toBuffer()
-    clipInputBase64 = thumb.toString('base64')
-  } catch { clipInputBase64 = normalizedBuf.toString('base64') }
+    clipInputBase64 = (await sharp(cropped).resize(800, 800,  { fit: 'inside' }).jpeg({ quality: 85 }).toBuffer()).toString('base64')
+    ocrInputBase64  = (await sharp(cropped).resize(1200, 1200, { fit: 'inside' }).jpeg({ quality: 90 }).toBuffer()).toString('base64')
+  } catch { clipInputBase64 = normalizedBuf.toString('base64'); ocrInputBase64 = clipInputBase64 }
 
   // Ét VARMT Railway-kald returnerer BÅDE embedding og OCR. Erstatter Vercels
   // cold-start-Tesseract (som tog ~11s → "server error"). Nu ~1-2s.
@@ -330,7 +335,7 @@ export default async function handler(req, res) {
   // CLIP-embedding + PaddleOCR kører PARALLELT (separate Railway-services) → latency = max, ikke sum.
   const [railway, ocrService] = await Promise.all([
     getServerEmbedding(clipInputBase64, safeGame),
-    getOcrService(clipInputBase64, safeGame),
+    getOcrService(ocrInputBase64, safeGame),
   ])
   scanDiag.railwayMs = Date.now() - _t0Rwy
   scanDiag.railwayOk = !!railway?.embedding
