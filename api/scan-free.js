@@ -18,6 +18,7 @@ const SUPABASE_URL  = process.env.SUPABASE_URL
 const SUPABASE_KEY  = process.env.SUPABASE_SERVICE_KEY
 const EMBED_URL     = process.env.EMBED_SERVICE_URL?.trim()   // Railway: https://xxx.up.railway.app
 const EMBED_SECRET  = process.env.EMBED_SECRET?.trim()        // Delt hemmelighed
+const OCR_SERVICE_URL = process.env.OCR_SERVICE_URL?.trim()   // Railway PaddleOCR-service (separat). Unset → Tesseract-fallback.
 
 const CORS = {
   'Access-Control-Allow-Origin':  '*',
@@ -86,8 +87,54 @@ async function getServerEmbedding(base64Image, game) {
   }
 }
 
+// ─── PaddleOCR-service (separat Railway-service) ──────────────────────────
+// Læser kortnummer OG kortnavn. Erstatter Railways svage Tesseract når sat.
+// Returnerer { number, setTotal, isCode, name }. null hvis unset/fejl → Tesseract-fallback.
+async function getOcrService(base64Image, game) {
+  if (!OCR_SERVICE_URL) return null
+  try {
+    const r = await fetch(`${OCR_SERVICE_URL}/ocr`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json', ...(EMBED_SECRET ? { Authorization: `Bearer ${EMBED_SECRET}` } : {}) },
+      body:    JSON.stringify({ image: `data:image/jpeg;base64,${base64Image}`, game }),
+      signal:  AbortSignal.timeout(15000),
+    })
+    if (!r.ok) return null
+    return await r.json()
+  } catch { return null }
+}
+
 // ─── Supabase ─────────────────────────────────────────────────────────────
 const sbh = () => ({ apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json' })
+
+// Navn-søgning: hent katalog-kort hvis navn matcher OCR-navnet. Grov prefix-ilike
+// server-side, så normaliseret fuzzy-match i JS (mellemrum-/tegn-immun: "GalarianArticuno"
+// == "Galarian Articuno"). Bringer det rigtige kort i puljen selv når CLIP missede det (rank -1).
+const normName = s => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+async function nameSearch(game, ocrName) {
+  const b = normName(ocrName)
+  const prefix = String(ocrName || '').replace(/[^A-Za-z]/g, '').slice(0, 4)
+  if (b.length < 4 || prefix.length < 3) return []
+  // limit høj: en 4-tegns prefix kan matche mange kort (fx "Gala" = 203) → for lav limit
+  // afkorter før det rigtige tryk. JS-filteret nedenfor narrows til eksakt normaliseret navn.
+  const r = await fetch(
+    `${SUPABASE_URL}/rest/v1/card_catalog?game=eq.${game}&name=ilike.*${prefix}*&number=not.like.product-*&select=id,name,number,phash&limit=1500`,
+    { headers: sbh() })
+  if (!r.ok) return []
+  const rows = await r.json()
+  return rows.filter(c => { const a = normName(c.name); return a && (a === b || a.includes(b) || b.includes(a)) })
+}
+
+// Per-kandidat navn-bonus (analog til numberBonus): boost et kort hvis dets navn matcher OCR-navnet.
+// Krydsvalidering: navn-match (+0.45) + nummer-match (numberBonus +0.55) → ~1.0 → vinder sikkert.
+function nameBonus(candName, ocrName) {
+  if (!ocrName || !candName) return 0
+  const a = normName(candName), b = normName(ocrName)
+  if (!a || !b || b.length < 4) return 0
+  if (a === b) return 0.45
+  if (a.includes(b) || b.includes(a)) return 0.30
+  return 0
+}
 
 // Per-spil CLIP-pool størrelse
 const CLIP_MATCH_COUNT = { pokemon: 30, pokemonjp: 30, dragonball: 40, yugioh: 40, default: 25 }
@@ -117,7 +164,7 @@ async function phashSearch(game, uploadedHash) {
   let offset = 0
   while (true) {
     const r = await fetch(
-      `${SUPABASE_URL}/rest/v1/card_catalog?game=eq.${game}&phash=not.is.null&number=not.like.product-*&select=id,number,phash&limit=1000&offset=${offset}`,
+      `${SUPABASE_URL}/rest/v1/card_catalog?game=eq.${game}&phash=not.is.null&number=not.like.product-*&select=id,name,number,phash&limit=1000&offset=${offset}`,
       { headers: sbh() }
     )
     if (!r.ok) break
@@ -128,7 +175,7 @@ async function phashSearch(game, uploadedHash) {
   }
   return all
     .filter(c => !String(c.id ?? '').includes('product'))   // produkter forurener ranking — også i phash-stien
-    .map(c => ({ id: c.id, number: c.number ?? null, dist: hammingDist(uploadedHash, c.phash) }))
+    .map(c => ({ id: c.id, name: c.name ?? null, number: c.number ?? null, dist: hammingDist(uploadedHash, c.phash) }))
     .sort((a, b) => a.dist - b.dist)
     .slice(0, 50)
 }
@@ -253,11 +300,18 @@ export default async function handler(req, res) {
   // cold-start-Tesseract (som tog ~11s → "server error"). Nu ~1-2s.
   const scanDiag = { thumbLen: clipInputBase64?.length ?? 0, embedUrlOk: !!EMBED_URL }
   const _t0Rwy = Date.now()
-  const railway = await getServerEmbedding(clipInputBase64, safeGame)
+  // CLIP-embedding + PaddleOCR kører PARALLELT (separate Railway-services) → latency = max, ikke sum.
+  const [railway, ocrService] = await Promise.all([
+    getServerEmbedding(clipInputBase64, safeGame),
+    getOcrService(clipInputBase64, safeGame),
+  ])
   scanDiag.railwayMs = Date.now() - _t0Rwy
   scanDiag.railwayOk = !!railway?.embedding
+  scanDiag.ocrSvc    = ocrService ? 'ok' : (OCR_SERVICE_URL ? 'fail' : 'unset')
   const railwayEmbedding = railway?.embedding ?? null
-  const ocrResult = railway?.ocr ?? null
+  // OCR: foretræk PaddleOCR-servicen (læser nummer OG navn); fald tilbage til Railways Tesseract.
+  const ocrResult = ocrService ?? railway?.ocr ?? null
+  const ocrName   = ocrService?.name ?? null
 
   const clientFallback = (clientEmbedding && Array.isArray(clientEmbedding) && clientEmbedding.length === 512)
     ? clientEmbedding : null
@@ -301,7 +355,9 @@ export default async function handler(req, res) {
   if (usedClip) {
     candidatePool = clipResults.map(c => ({
       id:        c.id,
+      name:      c.name ?? null,
       number:    c.number ?? null,
+      phash:     c.phash ?? null,
       clipSim:   typeof c.similarity === 'number' ? c.similarity : 0,
       phashDist: uploadedPhash ? hammingDist(uploadedPhash, c.phash) : null,
     }))
@@ -311,13 +367,30 @@ export default async function handler(req, res) {
       console.log('[scan] clip pool sparse (' + clipResultsRaw.length + '), fallback til phash')
     }
     const phashHits = uploadedPhash ? await phashSearch(safeGame, uploadedPhash) : []
-    candidatePool = phashHits.map(c => ({ id: c.id, number: c.number ?? null, clipSim: 0, phashDist: c.dist }))
+    candidatePool = phashHits.map(c => ({ id: c.id, name: c.name ?? null, number: c.number ?? null, phash: null, clipSim: 0, phashDist: c.dist }))
+  }
+
+  // Injicér navn-matchede katalog-kort. KRITISK: på holo-fotos er det rigtige kort ofte CLIP
+  // rank -1 (slet ikke i puljen) — en bonus kan ikke booste et fraværende kort. Navn-søgning
+  // henter alle tryk af det OCR-læste navn ind; numberBonus vælger så det rigtige tryk (krydsvalidering).
+  if (ocrName) {
+    const existing = new Set(candidatePool.map(c => c.id))
+    const nameHits = await nameSearch(safeGame, ocrName).catch(() => [])
+    for (const hch of nameHits) {
+      if (existing.has(hch.id)) continue
+      existing.add(hch.id)
+      candidatePool.push({
+        id: hch.id, name: hch.name ?? null, number: hch.number ?? null, phash: hch.phash ?? null,
+        clipSim: 0, phashDist: (uploadedPhash && hch.phash) ? hammingDist(uploadedPhash, hch.phash) : null,
+      })
+    }
+    scanDiag.nameHits = nameHits.length
   }
 
   if (!candidatePool.length) {
     return res.status(200).json({
       candidates: [], confidence: 'low', best: null,
-      ocr:  ocrNum ? { number: ocrNum, setTotal: ocrSetTotal } : null,
+      ocr:  (ocrNum || ocrName) ? { number: ocrNum, setTotal: ocrSetTotal, name: ocrName } : null,
       method: 'no-candidates',
       meta:  { game: safeGame, clip: usedClip, pool: 0, ...scanDiag },
     })
@@ -329,9 +402,10 @@ export default async function handler(req, res) {
     const clip   = c.clipSim
     const ph     = c.phashDist !== null ? 1 - c.phashDist / 64 : 0
     const number = numberBonus(c.number, ocrResult)
+    const name   = nameBonus(c.name, ocrName)   // navn+nummer der begge matcher = krydsvalideret → ~1.0
     const total  = usedClip
-      ? clip * w.clip + ph * w.phash + number
-      : ph * 0.75 + number
+      ? clip * w.clip + ph * w.phash + number + name
+      : ph * 0.75 + number + name
     return { id: c.id, total, clipSim: clip, phashSim: ph }
   }).sort((a, b) => b.total - a.total).slice(0, 5)
 
@@ -362,7 +436,7 @@ export default async function handler(req, res) {
     candidates,
     confidence,
     best:   confidence !== 'low' ? candidates[0] : null,
-    ocr:    ocrNum ? { number: ocrNum, setTotal: ocrSetTotal } : null,
+    ocr:    (ocrNum || ocrName) ? { number: ocrNum, setTotal: ocrSetTotal, name: ocrName } : null,
     method: usedClip ? 'clip+phash+ocr' : 'phash+ocr',
     meta:   { game: safeGame, clip: usedClip, clipRaw: clipResultsRaw?.length ?? 0, pool: candidatePool.length, ...scanDiag },
   })
