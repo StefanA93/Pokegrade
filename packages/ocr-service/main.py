@@ -138,21 +138,33 @@ def ocr(req: OcrReq, authorization: str = Header(default="")):
     except Exception:
         raise HTTPException(status_code=400, detail="invalid image")
 
-    # Pass 1: hele kortet → navn + ofte nummer
+    # Pass 1: hele kortet → navn (+ ofte nummer for regulære kort).
     texts = _run(img)
-    parsed = _parse_number(texts, game)
+    full_num = _parse_number(texts, game)
 
-    # Pass 2 (kun hvis nummer mangler): beskær nummer-zonen (bund-venstre), gråtone +
-    # autokontrast + opskalér — recept bevist på standalone-crops (læser hvor fuldt kort missede).
-    if parsed["number"] is None:
-        parsed = _parse_number(_run(_number_region(img)), game)
+    # Pass 2 (ALTID): dedikeret nummer-bånd. Fuld-bredde bund (fanger nummer venstre ELLER højre
+    # på tværs af æraer/layouts) + kraftig upscale (lille 3-cifret full-art-nummer bliver læsbart →
+    # taber ikke længere det ledende ciffer, fx 214→14). Læser hvor fuld-kort-OCR missede.
+    band_num = _parse_number(_run(_number_band(img)), game)
 
-    return {**parsed, "name": _guess_name(texts), "texts": texts}
+    return {**_best_number(band_num, full_num), "name": _guess_name(texts), "texts": texts}
 
 
-def _number_region(img: Image.Image) -> Image.Image:
+def _number_band(img: Image.Image) -> Image.Image:
     w, h = img.size
-    region = img.crop((int(w * 0.02), int(h * 0.88), int(w * 0.42), int(h * 0.98)))
-    region = ImageOps.autocontrast(region.convert("L"))
-    scale = 800 / max(1, region.width)   # opskalér til ~800px bredde (float, ikke heltal)
-    return region.resize((800, max(1, int(region.height * scale)))).convert("RGB")
+    band = img.crop((0, int(h * 0.85), w, h))          # fuld-bredde bund-bånd
+    band = ImageOps.autocontrast(band.convert("L"))
+    scale = 1800 / max(1, band.width)                  # kraftig upscale → små cifre bliver læsbare
+    return band.resize((1800, max(1, int(band.height * scale)))).convert("RGB")
+
+
+# Vælg det mest komplette nummer: fuld NNN/NNN (setTotal sat) > kun nummer > intet.
+# Båndet (a) vægtes over fuld-kort (b) ved lige — det er bedre isoleret.
+def _best_number(a: dict, b: dict) -> dict:
+    for c in (a, b):
+        if c["number"] is not None and (c["setTotal"] is not None or c["isCode"]):
+            return c
+    for c in (a, b):
+        if c["number"] is not None:
+            return c
+    return a
