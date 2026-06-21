@@ -152,36 +152,6 @@ async function fetchEmbeddings(ids) {
   return out
 }
 
-// Nummer-søgning (symmetrisk til nameSearch): hent kort hvis nummer-del + sæt-total matcher OCR-nummeret.
-// Redder kort hvor NUMMERET læses men navnet fejler (fx full-art hvor PaddleOCR garbler navnet, Latias 239).
-// number+setTotal er en næsten-entydig nøgle. Grov like server-side, eksakt parseCardNum-filter i JS.
-async function numberSearch(game, num, total) {
-  if (!num || !total) return []
-  const r = await fetch(
-    `${SUPABASE_URL}/rest/v1/card_catalog?game=eq.${game}&number=like.*${num}/${total}*&number=not.like.product-*&select=id,name,number,phash&limit=40`,
-    { headers: sbh() })
-  if (!r.ok) return []
-  const rows = await r.json()
-  return rows.filter(c => { const p = parseCardNum(c.number); return p.num === String(parseInt(num, 10)) && p.total === total })
-}
-
-// Injicér en liste hits i kandidatpuljen med ÆGTE CLIP-cosine (ikke clipSim=0) → visuelt-nærmeste
-// tryk vinder. Genbruges af både navn- og nummer-injektion. Muterer candidatePool + existing.
-async function injectHits(hits, candidatePool, existing, activeEmbedding, uploadedPhash) {
-  const fresh = hits.filter(h => !existing.has(h.id))
-  const embMap = activeEmbedding ? await fetchEmbeddings(fresh.map(h => h.id)).catch(() => ({})) : {}
-  for (const h of fresh) {
-    existing.add(h.id)
-    const emb = embMap[h.id]
-    candidatePool.push({
-      id: h.id, name: h.name ?? null, number: h.number ?? null, phash: h.phash ?? null,
-      clipSim: emb ? cosineSim(activeEmbedding, emb) : 0,
-      phashDist: (uploadedPhash && h.phash) ? hammingDist(uploadedPhash, h.phash) : null,
-    })
-  }
-  return fresh.length
-}
-
 // Per-kandidat navn-bonus (analog til numberBonus): boost et kort hvis dets navn matcher OCR-navnet.
 // Krydsvalidering: navn-match (+0.45) + nummer-match (numberBonus +0.55) → ~1.0 → vinder sikkert.
 function nameBonus(candName, ocrName) {
@@ -432,18 +402,25 @@ export default async function handler(req, res) {
     candidatePool = phashHits.map(c => ({ id: c.id, name: c.name ?? null, number: c.number ?? null, phash: null, clipSim: 0, phashDist: c.dist }))
   }
 
-  // Injicér katalog-kort der matcher OCR-NAVNET og OCR-NUMMERET. KRITISK: på holo/full-art-fotos er
-  // det rigtige kort ofte CLIP rank -1 (slet ikke i puljen) — en bonus kan ikke booste et fraværende kort.
-  // Navn-injektion redder når navnet læses; NUMMER-injektion redder når NUMMERET læses men navnet fejler
-  // (full-art hvor PaddleOCR garbler navnet). Kortet der matcher BÅDE vinder via krydsvalidering.
-  const existing = new Set(candidatePool.map(c => c.id))
+  // Injicér navn-matchede katalog-kort. KRITISK: på holo-fotos er det rigtige kort ofte CLIP
+  // rank -1 (slet ikke i puljen) — en bonus kan ikke booste et fraværende kort. Navn-søgning
+  // henter alle tryk af det OCR-læste navn ind; numberBonus vælger så det rigtige tryk (krydsvalidering).
   if (ocrName) {
-    const nameHits = await nameSearch(safeGame, ocrName).catch(() => [])
-    scanDiag.nameHits = await injectHits(nameHits, candidatePool, existing, activeEmbedding, uploadedPhash)
-  }
-  if (ocrNum && ocrSetTotal) {
-    const numHits = await numberSearch(safeGame, ocrNum, ocrSetTotal).catch(() => [])
-    scanDiag.numHits = await injectHits(numHits, candidatePool, existing, activeEmbedding, uploadedPhash)
+    const existing = new Set(candidatePool.map(c => c.id))
+    const nameHits = (await nameSearch(safeGame, ocrName).catch(() => [])).filter(h => !existing.has(h.id))
+    // CLIP-rank de injicerede kort: ægte cosine mod scan-embeddingen (ikke clipSim=0). Distinkt-art-
+    // rarities (SIR/IR/secret) vinder så visuelt blandt samme-navn-tryk; numberBonus afgør same-art.
+    const embMap = activeEmbedding ? await fetchEmbeddings(nameHits.map(h => h.id)).catch(() => ({})) : {}
+    for (const hch of nameHits) {
+      existing.add(hch.id)
+      const emb = embMap[hch.id]
+      candidatePool.push({
+        id: hch.id, name: hch.name ?? null, number: hch.number ?? null, phash: hch.phash ?? null,
+        clipSim: emb ? cosineSim(activeEmbedding, emb) : 0,
+        phashDist: (uploadedPhash && hch.phash) ? hammingDist(uploadedPhash, hch.phash) : null,
+      })
+    }
+    scanDiag.nameHits = nameHits.length
   }
 
   if (!candidatePool.length) {
