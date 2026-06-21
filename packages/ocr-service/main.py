@@ -114,6 +114,25 @@ def _parse_number(texts: list[str], game: str) -> dict:
     return {"number": None, "setTotal": None, "isCode": False}
 
 
+# Bar collector-numerator (num-only) når NNN/NNN-parse fejlede i ALLE passes. Kun fra bund-zone-
+# tekster (HP/skade sidder ØVERST på kortet → bund-venstre-tal er ~altid collector-nummeret).
+# Token skal være domineret af cifre (1-3, uden slash) → undgår illustrator-navne, copyright-år
+# (4-cifret) og total-uden-numerator. scan-free giver så num-only-bonus (+0.30) → vælger rigtigt
+# tryk når konkurrenten har en ANDEN numerator (de fleste null-cases). Same-numerator-trykke
+# (10/102 vs 10/130) forbliver coin-flip → uskadeligt.
+def _bare_numerator(texts: list[str]) -> str | None:
+    for t in texts:
+        s = t.strip()
+        if "/" in s:
+            continue  # slash-format håndteres allerede af _parse_number
+        digits = re.sub(r"\D", "", s)
+        if 1 <= len(digits) <= 3 and len(digits) >= len(s) * 0.5:
+            v = int(digits)
+            if 1 <= v <= 400:
+                return str(v)
+    return None
+
+
 def _guess_name(texts: list[str]) -> str | None:
     # Navnet er typisk en af de øverste linjer med overvejende bogstaver, ikke system-tekst.
     # Strip efterhængt HP-tal ("Smeargle80" → "Smeargle") og trim symboler.
@@ -171,18 +190,31 @@ def _number_variants(img: Image.Image) -> list[Image.Image]:
 # mest komplet (setTotal/kode) → højest num-værdi (3-cifret > misread 1-cifret som mistede ledende ciffer).
 def _read_number(img: Image.Image, game: str, full_texts: list[str]) -> dict:
     votes = Counter()
-    for texts in [full_texts] + [_run(v) for v in _number_variants(img)]:
+    band_texts = [_run(v) for v in _number_variants(img)]
+    for texts in [full_texts] + band_texts:
         p = _parse_number(texts, game)
         if p["number"] is not None:
             votes[(p["number"], p["setTotal"], p["isCode"])] += 1
-    if not votes:
-        return {"number": None, "setTotal": None, "isCode": False}
 
-    def rank(item):
-        (num, total, is_code), n = item
-        complete = 1 if (total is not None or is_code) else 0
-        val = int(num) if (num and num.isdigit()) else 0
-        return (n, complete, val)
+    if votes:
+        def rank(item):
+            (num, total, is_code), n = item
+            complete = 1 if (total is not None or is_code) else 0
+            val = int(num) if (num and num.isdigit()) else 0
+            return (n, complete, val)
+        (num, total, is_code), _ = max(votes.items(), key=rank)
+        return {"number": num, "setTotal": total, "isCode": is_code}
 
-    (num, total, is_code), _ = max(votes.items(), key=rank)
-    return {"number": num, "setTotal": total, "isCode": is_code}
+    # Fallback: ingen NNN/NNN i NOGEN pass → stem på bar collector-numerator fra bund-zonerne
+    # (IKKE fuldt-kort-pass = HP øverst). Rescuer null-cases hvor numeratoren læses men totalen ikke.
+    if game not in CODE_GAMES:
+        bare = Counter()
+        for texts in band_texts:
+            b = _bare_numerator(texts)
+            if b is not None:
+                bare[b] += 1
+        if bare:
+            num, _ = max(bare.items(), key=lambda kv: (kv[1], -int(kv[0])))
+            return {"number": num, "setTotal": None, "isCode": False}
+
+    return {"number": None, "setTotal": None, "isCode": False}
