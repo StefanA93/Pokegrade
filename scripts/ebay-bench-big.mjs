@@ -20,6 +20,18 @@ function newestDeploy() {
   return o.match(/https:\/\/pokegrade-[a-z0-9]+-stefana93\.vercel\.app/)[0]
 }
 
+// src kan være en URL (eBay) ELLER en lokal sti (bruger-uploadede rene kort) → returnér data-URL.
+async function loadDataUrl(src) {
+  if (/^https?:/.test(src)) {
+    const buf = Buffer.from(await (await fetch(src, { headers: { 'User-Agent': UA }, signal: AbortSignal.timeout(20000) })).arrayBuffer())
+    return 'data:image/webp;base64,' + buf.toString('base64')
+  }
+  const buf = readFileSync(src)
+  const ext = (src.split('.').pop() || '').toLowerCase()
+  const mime = ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg'
+  return `data:${mime};base64,` + buf.toString('base64')
+}
+
 function eraOf(title) {
   const t = title.toLowerCase()
   if (/base set 2/.test(t)) return '1b WotC Base2'
@@ -73,8 +85,8 @@ async function run() {
     const era = eraOf(row.title || ''), rar = rarityOf(row.title || '', row.num, row.total)
     let numOk = false, numTotalOk = false, topStr = 'ingen'
     try {
-      const buf = Buffer.from(await (await fetch(row.src, { headers: { 'User-Agent': UA }, signal: AbortSignal.timeout(20000) })).arrayBuffer())
-      const r = await fetch(`${DEPLOY}/api/scan-free`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-vercel-protection-bypass': BYPASS }, body: JSON.stringify({ image: 'data:image/webp;base64,' + buf.toString('base64'), game: GAME }), signal: AbortSignal.timeout(60000) })
+      const dataUrl = await loadDataUrl(row.src)
+      const r = await fetch(`${DEPLOY}/api/scan-free`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-vercel-protection-bypass': BYPASS }, body: JSON.stringify({ image: dataUrl, game: GAME }), signal: AbortSignal.timeout(60000) })
       const b = await r.json(); const top = b.candidates?.[0]
       const m = top ? String(top.number).match(/(\d{1,4})[a-z]?\s*(?:\/\s*(\d{1,4}))?/i) : null
       const tNum = m ? (m[1].replace(/^0+/, '') || '0') : '?'
