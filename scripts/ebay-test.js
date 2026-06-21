@@ -69,6 +69,7 @@ async function run() {
       appendFileSync(outFile, JSON.stringify({ ebay: { num: row.num, total: row.total }, top1: top ? { name: top.name, number: top.number } : null, numOk, numTotalOk }) + '\n')
       console.log(`${numTotalOk ? '✅' : numOk ? '🟡num' : '❌'}  eBay ${row.num}/${row.total}  →  ${top ? top.name + ' ' + top.number + ' (' + top._clip + ')' : 'ingen'}`)
     } catch (e) { console.log('fejl ' + row.num + ': ' + e.message); scanned++ }
+    await new Promise(r => setTimeout(r, 2000))   // real-user spredt (ikke burst) → måler isolation-performance
   }
   console.log(`\n── ${GAME} real-world (n=${scanned}) ──`)
   console.log(`  num+total-match (rigtigt kort+sæt): ${((numTotal / (scanned || 1)) * 100).toFixed(0)}%`)
