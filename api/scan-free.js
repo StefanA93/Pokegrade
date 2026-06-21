@@ -125,6 +125,24 @@ async function nameSearch(game, ocrName) {
   return rows.filter(c => { const a = normName(c.name); return a && (a === b || a.includes(b) || b.includes(a)) })
 }
 
+// Nummer-injektion (analog til nameSearch): hent alle tryk med numerator==num OG denominator==total.
+// KRITISK gate (kaldes kun når BÅDE nummer OG setTotal er læst = høj konfidens): på holo/full-art/
+// regeltekst-fotos fejler navne-parseren ofte (læser angrebstekst), så det rigtige kort er hverken i
+// CLIP-puljen el. navn-injiceret. Når nummeret+totalen ER læst, henter dette det/de rigtige tryk ind;
+// flere sæt deler samme størrelse (fx /102 = Base Set OG Triumphant) → CLIP-rank afgør visuelt blandt dem.
+async function numberSearch(game, num, total) {
+  if (num == null || !total) return []
+  const r = await fetch(
+    `${SUPABASE_URL}/rest/v1/card_catalog?game=eq.${game}&number=like.*/${total}&number=not.like.product-*&select=id,name,number,phash&limit=400`,
+    { headers: sbh() })
+  if (!r.ok) return []
+  const want = String(parseInt(num, 10))
+  return (await r.json()).filter(c => {
+    const m = String(c.number ?? '').match(/^(\d{1,4})\s*\//)
+    return m && String(parseInt(m[1], 10)) === want
+  })
+}
+
 // Cosine-similarity i JS (samme mål som match_cards' 1-(embedding<=>query)) — til CLIP-ranking
 // af navn-injicerede kort der ligger UDEN FOR CLIP-poolen (top-30).
 function cosineSim(a, b) {
@@ -421,6 +439,26 @@ export default async function handler(req, res) {
       })
     }
     scanDiag.nameHits = nameHits.length
+  }
+
+  // Nummer-injektion: når BÅDE nummer OG setTotal er læst (høj konfidens), hent num/total-trykkene ind.
+  // Redder de tilfælde hvor navne-parseren fejlede (læste regeltekst → nameHits=0) ELLER kortet har
+  // distinkt art (LV.X/Prime/LEGEND/full-art) så CLIP ikke rangerede det — nummeret læses tit korrekt
+  // her, men en bonus kan ikke booste et fraværende kort. setTotal-gaten gør at en bar numerator-
+  // misread (uden total) IKKE trigger injektion (det var hvorfor ren nummer-injektion blev revertet).
+  if (ocrNum && ocrSetTotal) {
+    const existing = new Set(candidatePool.map(c => c.id))
+    const numHits = (await numberSearch(safeGame, ocrNum, ocrSetTotal).catch(() => [])).filter(h => !existing.has(h.id))
+    const embMap = activeEmbedding ? await fetchEmbeddings(numHits.map(h => h.id)).catch(() => ({})) : {}
+    for (const hch of numHits) {
+      const emb = embMap[hch.id]
+      candidatePool.push({
+        id: hch.id, name: hch.name ?? null, number: hch.number ?? null, phash: hch.phash ?? null,
+        clipSim: emb ? cosineSim(activeEmbedding, emb) : 0,
+        phashDist: (uploadedPhash && hch.phash) ? hammingDist(uploadedPhash, hch.phash) : null,
+      })
+    }
+    scanDiag.numHits = numHits.length
   }
 
   if (!candidatePool.length) {
