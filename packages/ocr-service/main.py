@@ -157,13 +157,18 @@ def _up(g: Image.Image, width: int) -> Image.Image:
 # giver PaddleOCR flere chancer for at fange det thin ledende ciffer; voting vælger konsensus.
 def _number_variants(img: Image.Image) -> list[Image.Image]:
     w, h = img.size
-    band = img.crop((0, int(h * 0.85), w, h))                 # fuld-bredde bund-bånd
-    g = ImageOps.autocontrast(band.convert("L"))
-    bl = ImageOps.autocontrast(img.crop((0, int(h * 0.87), int(w * 0.55), int(h * 0.99))).convert("L"))
+    def crop(x0, y0, x1, y1):
+        return ImageOps.autocontrast(img.crop((int(w * x0), int(h * y0), int(w * x1), int(h * y1))).convert("L"))
+    # Collector-nummeret sidder y~0.80-0.97 og kan være bund-VENSTRE (moderne SV) ELLER bund-HØJRE
+    # (Prime/LEGEND/LvX/secret/full-art-æraer). Det gamle bånd (0.85-1.0 + kun bund-venstre) klippede
+    # høj-position-numre (0.83-0.85, over weakness-rækken) OG missede bund-højre helt → 107/123, 105/106,
+    # 113/108, 81/123 fejlede. Bredt 0.80-0.98 + dedikeret bund-højre + bund-venstre dækker alle layouts.
+    wide = crop(0.0, 0.80, 1.0, 0.98)
     return [
-        _up(g, 1400),
-        _up(g.filter(ImageFilter.SHARPEN), 1500),
-        _up(bl, 1300),                                        # tæt bund-venstre (Pokemon-nummer-position)
+        _up(wide, 1500),
+        _up(crop(0.50, 0.80, 1.0, 0.98), 1500),   # bund-HØJRE (Prime/LEGEND/LvX/secret-position)
+        _up(crop(0.0, 0.84, 0.50, 1.0), 1400),     # bund-VENSTRE (moderne SV-position)
+        _up(wide.filter(ImageFilter.SHARPEN), 1500),
     ]
 
 
