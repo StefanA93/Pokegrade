@@ -167,25 +167,19 @@ async function numberSearch(game, num, total) {
 
 // Injicér en liste hits i kandidatpuljen med ÆGTE CLIP-cosine (ikke clipSim=0) → visuelt-nærmeste
 // tryk vinder. Genbruges af både navn- og nummer-injektion. Muterer candidatePool + existing.
-// minClip: nummer-injektion bruger et clipSim-gulv → et FEJLLÆST nummer injicerer et visuelt-
-// usandsynligt kort (lav clip) der så blokeres; navn-injektion bruger 0 (navn-match er selv signalet).
-async function injectHits(hits, candidatePool, existing, activeEmbedding, uploadedPhash, minClip = 0) {
+async function injectHits(hits, candidatePool, existing, activeEmbedding, uploadedPhash) {
   const fresh = hits.filter(h => !existing.has(h.id))
   const embMap = activeEmbedding ? await fetchEmbeddings(fresh.map(h => h.id)).catch(() => ({})) : {}
-  let added = 0
   for (const h of fresh) {
-    const emb = embMap[h.id]
-    const clipSim = emb ? cosineSim(activeEmbedding, emb) : 0
-    if (clipSim < minClip) continue   // visuelt-usandsynligt (misread-koincidens) → injicér ikke
     existing.add(h.id)
+    const emb = embMap[h.id]
     candidatePool.push({
       id: h.id, name: h.name ?? null, number: h.number ?? null, phash: h.phash ?? null,
-      clipSim,
+      clipSim: emb ? cosineSim(activeEmbedding, emb) : 0,
       phashDist: (uploadedPhash && h.phash) ? hammingDist(uploadedPhash, h.phash) : null,
     })
-    added++
   }
-  return added
+  return fresh.length
 }
 
 // Per-kandidat navn-bonus (analog til numberBonus): boost et kort hvis dets navn matcher OCR-navnet.
@@ -449,9 +443,7 @@ export default async function handler(req, res) {
   }
   if (ocrNum && ocrSetTotal) {
     const numHits = await numberSearch(safeGame, ocrNum, ocrSetTotal).catch(() => [])
-    // clipSim-gulv 0.40: et fejllæst nummer (fx 106→6) injicerer et visuelt-fremmed kort (Tropius,
-    // clip ~0.3) der blokeres; et korrekt-læst nummer rammer det fotograferede kort (decent clip).
-    scanDiag.numHits = await injectHits(numHits, candidatePool, existing, activeEmbedding, uploadedPhash, 0.40)
+    scanDiag.numHits = await injectHits(numHits, candidatePool, existing, activeEmbedding, uploadedPhash)
   }
 
   if (!candidatePool.length) {
