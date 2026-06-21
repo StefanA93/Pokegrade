@@ -160,10 +160,18 @@ def _number_variants(img: Image.Image) -> list[Image.Image]:
     band = img.crop((0, int(h * 0.85), w, h))                 # fuld-bredde bund-bånd
     g = ImageOps.autocontrast(band.convert("L"))
     bl = ImageOps.autocontrast(img.crop((0, int(h * 0.87), int(w * 0.55), int(h * 0.99))).convert("L"))
+    # ADDITIVE (bevarer ovenstående → ingen regression, bevist offline på 211-korts harness): tilføj
+    # bund-HØJRE (Prime/LEGEND/LvX/secret-nummer ved y~0.82-0.85, x~0.7) + bredt 0.82-0.99 der fanger
+    # høj-position-numre over weakness-rækken. +8 numre læst korrekt (105/106, 107/123, 93/106, 10/130,
+    # 143/236...) med 0 regression vs det gamle bånd.
+    br = ImageOps.autocontrast(img.crop((int(w * 0.45), int(h * 0.82), w, h)).convert("L"))
+    wide = ImageOps.autocontrast(img.crop((0, int(h * 0.82), w, int(h * 0.99))).convert("L"))
     return [
         _up(g, 1400),
         _up(g.filter(ImageFilter.SHARPEN), 1500),
-        _up(bl, 1300),                                        # tæt bund-venstre (Pokemon-nummer-position)
+        _up(bl, 1300),                                        # tæt bund-venstre (moderne SV-position)
+        _up(br, 1500),                                        # bund-HØJRE (Prime/LEGEND/LvX/secret)
+        _up(wide, 1500),                                      # bredt høj-position (over weakness-rækken)
     ]
 
 
