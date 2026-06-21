@@ -24,7 +24,8 @@ import re
 
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel
-from PIL import Image, ImageOps
+from PIL import Image, ImageOps, ImageFilter
+from collections import Counter
 import numpy as np
 
 # Maks billed-dimension før OCR — beskytter mod store-billede memory-spikes (scan-free sender
@@ -140,31 +141,48 @@ def ocr(req: OcrReq, authorization: str = Header(default="")):
 
     # Pass 1: hele kortet → navn (+ ofte nummer for regulære kort).
     texts = _run(img)
-    full_num = _parse_number(texts, game)
+    # Nummer: multi-pass VOTING over flere preprocessing-varianter af nummer-zonen → stabilt
+    # (PaddleOCR's detektion af det lille collector-nummer var intermittent: 214↔null, 106↔"6").
+    num = _read_number(img, game, texts)
 
-    # Pass 2 (ALTID): dedikeret nummer-bånd. Fuld-bredde bund (fanger nummer venstre ELLER højre
-    # på tværs af æraer/layouts) + kraftig upscale (lille 3-cifret full-art-nummer bliver læsbart →
-    # taber ikke længere det ledende ciffer, fx 214→14). Læser hvor fuld-kort-OCR missede.
-    band_num = _parse_number(_run(_number_band(img)), game)
-
-    return {**_best_number(band_num, full_num), "name": _guess_name(texts), "texts": texts}
+    return {**num, "name": _guess_name(texts), "texts": texts}
 
 
-def _number_band(img: Image.Image) -> Image.Image:
+def _up(g: Image.Image, width: int) -> Image.Image:
+    scale = width / max(1, g.width)
+    return g.resize((width, max(1, int(g.height * scale)))).convert("RGB")
+
+
+# Flere preprocessing-varianter af nummer-zonen — forskellige greb (upscale/sharpen/edge/tæt-crop)
+# giver PaddleOCR flere chancer for at fange det thin ledende ciffer; voting vælger konsensus.
+def _number_variants(img: Image.Image) -> list[Image.Image]:
     w, h = img.size
-    band = img.crop((0, int(h * 0.85), w, h))          # fuld-bredde bund-bånd
-    band = ImageOps.autocontrast(band.convert("L"))
-    scale = 1800 / max(1, band.width)                  # kraftig upscale → små cifre bliver læsbare
-    return band.resize((1800, max(1, int(band.height * scale)))).convert("RGB")
+    band = img.crop((0, int(h * 0.85), w, h))                 # fuld-bredde bund-bånd
+    g = ImageOps.autocontrast(band.convert("L"))
+    bl = ImageOps.autocontrast(img.crop((0, int(h * 0.87), int(w * 0.55), int(h * 0.99))).convert("L"))
+    return [
+        _up(g, 1800),
+        _up(g.filter(ImageFilter.SHARPEN), 2000),
+        _up(bl, 1700),                                        # tæt bund-venstre (Pokemon-nummer-position)
+    ]
 
 
-# Vælg det mest komplette nummer: fuld NNN/NNN (setTotal sat) > kun nummer > intet.
-# Båndet (a) vægtes over fuld-kort (b) ved lige — det er bedre isoleret.
-def _best_number(a: dict, b: dict) -> dict:
-    for c in (a, b):
-        if c["number"] is not None and (c["setTotal"] is not None or c["isCode"]):
-            return c
-    for c in (a, b):
-        if c["number"] is not None:
-            return c
-    return a
+# Stem på nummeret på tværs af fuld-kort + nummer-varianter. Tie-break: flest stemmer →
+# mest komplet (setTotal/kode) → højest num-værdi (3-cifret > misread 1-cifret som mistede ledende ciffer).
+def _read_number(img: Image.Image, game: str, full_texts: list[str]) -> dict:
+    votes = Counter()
+    for texts in [full_texts] + [_run(v) for v in _number_variants(img)]:
+        p = _parse_number(texts, game)
+        if p["number"] is not None:
+            votes[(p["number"], p["setTotal"], p["isCode"])] += 1
+    if not votes:
+        return {"number": None, "setTotal": None, "isCode": False}
+
+    def rank(item):
+        (num, total, is_code), n = item
+        complete = 1 if (total is not None or is_code) else 0
+        val = int(num) if (num and num.isdigit()) else 0
+        return (n, complete, val)
+
+    (num, total, is_code), _ = max(votes.items(), key=rank)
+    return {"number": num, "setTotal": total, "isCode": is_code}
