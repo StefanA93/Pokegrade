@@ -12,11 +12,11 @@ på holo-kort hvor det bittesmå nummer fejler). Tesseract/TrOCR kunne ingen af 
 Stabil stak: paddlepaddle==2.6.2 + paddleocr==2.9.1 (3.x har oneDNN/PIR-crash på nogle CPU'er).
 """
 import os
-# Begræns RAM-peak FØR paddle/numpy importeres: 1 tråd pr. math-lib → markant lavere hukommelse
-# (PaddleOCR-inference OOM-dræbte containeren på trial-instansen ved samtidige tråde).
-os.environ.setdefault("OMP_NUM_THREADS", "1")
-os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
-os.environ.setdefault("MKL_NUM_THREADS", "1")
+# Tråde: 4 (på Railway Hobby — mere RAM). 1-tråds gav OOM-sikkerhed på trial men gjorde multi-pass
+# voting for langsom (10-16s → getOcrService-timeouts). 4 tråde → ~4x hurtigere inference.
+os.environ.setdefault("OMP_NUM_THREADS", "4")
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "4")
+os.environ.setdefault("MKL_NUM_THREADS", "4")
 
 import base64
 import io
@@ -53,7 +53,7 @@ def get_ocr():
         # use_angle_cls=False: drop angle-classifier-modellen (kort er opretstående) → mindre RAM.
         # enable_mkldnn=False + 1 tråd: lavere hukommelses-peak under inference.
         _ocr = PaddleOCR(use_angle_cls=False, lang="en", show_log=False,
-                         enable_mkldnn=False, cpu_threads=1)
+                         enable_mkldnn=True, cpu_threads=4)
         _ready = True
     return _ocr
 
@@ -161,9 +161,9 @@ def _number_variants(img: Image.Image) -> list[Image.Image]:
     g = ImageOps.autocontrast(band.convert("L"))
     bl = ImageOps.autocontrast(img.crop((0, int(h * 0.87), int(w * 0.55), int(h * 0.99))).convert("L"))
     return [
-        _up(g, 1800),
-        _up(g.filter(ImageFilter.SHARPEN), 2000),
-        _up(bl, 1700),                                        # tæt bund-venstre (Pokemon-nummer-position)
+        _up(g, 1400),
+        _up(g.filter(ImageFilter.SHARPEN), 1500),
+        _up(bl, 1300),                                        # tæt bund-venstre (Pokemon-nummer-position)
     ]
 
 

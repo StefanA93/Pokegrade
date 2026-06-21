@@ -97,7 +97,7 @@ async function getOcrService(base64Image, game) {
       method:  'POST',
       headers: { 'Content-Type': 'application/json', ...(EMBED_SECRET ? { Authorization: `Bearer ${EMBED_SECRET}` } : {}) },
       body:    JSON.stringify({ image: `data:image/jpeg;base64,${base64Image}`, game }),
-      signal:  AbortSignal.timeout(15000),
+      signal:  AbortSignal.timeout(22000),   // multi-pass voting er tungere → mere margin
     })
     if (!r.ok) return null
     return await r.json()
