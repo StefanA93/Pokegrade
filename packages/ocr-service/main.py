@@ -157,21 +157,16 @@ def _up(g: Image.Image, width: int) -> Image.Image:
 # giver PaddleOCR flere chancer for at fange det thin ledende ciffer; voting vælger konsensus.
 def _number_variants(img: Image.Image) -> list[Image.Image]:
     w, h = img.size
-    band = img.crop((0, int(h * 0.85), w, h))                 # fuld-bredde bund-bånd
-    g = ImageOps.autocontrast(band.convert("L"))
-    bl = ImageOps.autocontrast(img.crop((0, int(h * 0.87), int(w * 0.55), int(h * 0.99))).convert("L"))
-    # ADDITIVE (bevarer ovenstående → ingen regression, bevist offline på 211-korts harness): tilføj
-    # bund-HØJRE (Prime/LEGEND/LvX/secret-nummer ved y~0.82-0.85, x~0.7) + bredt 0.82-0.99 der fanger
-    # høj-position-numre over weakness-rækken. +8 numre læst korrekt (105/106, 107/123, 93/106, 10/130,
-    # 143/236...) med 0 regression vs det gamle bånd.
-    br = ImageOps.autocontrast(img.crop((int(w * 0.45), int(h * 0.82), w, h)).convert("L"))
-    wide = ImageOps.autocontrast(img.crop((0, int(h * 0.82), w, int(h * 0.99))).convert("L"))
+    def ac(x0, y0, x1, y1):
+        return ImageOps.autocontrast(img.crop((int(w * x0), int(h * y0), int(w * x1), int(h * y1))).convert("L"))
+    # LEAN sæt (bevist via 211-korts bidrags-audit): 3 nummer-zone-crops + fuld-kort-pass = 4 passes total,
+    # som læser FLERE numre korrekt (180 vs 178) end det gamle 6-pass-sæt, med -33% CPU/RAM. Det gamle
+    # bund-bånd (`og`) bidrog 0 unikke kort = ren dødvægt → fjernet. Collector-nummeret sidder bund-HØJRE
+    # (full-art/Prime/LvX/secret-hjørne), bund-bredt, ELLER bund-venstre (dækket af det brede bånd + fuld-kort).
     return [
-        _up(g, 1400),
-        _up(g.filter(ImageFilter.SHARPEN), 1500),
-        _up(bl, 1300),                                        # tæt bund-venstre (moderne SV-position)
-        _up(br, 1500),                                        # bund-HØJRE (Prime/LEGEND/LvX/secret)
-        _up(wide, 1500),                                      # bredt høj-position (over weakness-rækken)
+        _up(ac(0.62, 0.80, 1.0, 0.99), 1500),   # yderste bund-HØJRE — hjørne-nummer (M Venusaur, Donphan Prime)
+        _up(ac(0.45, 0.82, 1.0, 1.0), 1500),     # bund-højre bredt
+        _up(ac(0.0, 0.82, 1.0, 0.99), 1500),     # fuld-bredde bund-bånd (venstre → højre)
     ]
 
 

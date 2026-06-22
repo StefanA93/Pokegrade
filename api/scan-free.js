@@ -292,6 +292,10 @@ async function autoCropCard(buf) {
     const T = Math.max(0, Math.floor((top / h - 0.02) * meta.height))
     const R = Math.min(meta.width, Math.ceil((rgt / w + 0.015) * meta.width))
     const B = Math.min(meta.height, Math.ceil((bot / h + 0.04) * meta.height))   // +4% bund: bevar nummer-båndet
+    // Aspekt-guard: et Pokemon-kort er ~0.71. Hvis bbox'en bliver unaturligt smal/bred (<0.55 el. >0.95)
+    // har gradient-projektionen fejlet (fx full-art/secret-holo i toploader → skar nummer-zonen væk) → no-op.
+    const boxAspect = (R - L) / Math.max(1, B - T)
+    if (boxAspect < 0.55 || boxAspect > 0.95) return buf
     return await sharp(buf).extract({ left: L, top: T, width: R - L, height: B - T }).toBuffer()
   } catch { return buf }
 }
