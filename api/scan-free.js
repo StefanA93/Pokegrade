@@ -338,17 +338,21 @@ export default async function handler(req, res) {
   // VIGTIGT: bevar aspect ratio (fit:inside) — IKKE stretch. Railway/CLIP-processoren
   // laver selv resize(224)+center-crop, præcis som backfill. Stretch gav cosine 0.85
   // mod kataloget (skulle være ~1.0) → forkerte matches.
-  // 800px giver nok opløsning til at Railway-OCR kan læse kortnummeret (embedding nedskalerer selv).
-  // Auto-crop kortet ud af baggrunden FØR embedding/OCR — så kortet fylder rammen som i kataloget.
-  // CLIP: 800px (processoren nedskalerer til 224). OCR: 1200px — små full-art-numre kræver
-  // højere opløsning (800px → nummeret tabes; 1100-1200px → læses). OCR-servicen capper selv til 1100.
+  // CLIP: auto-crop kortet ud af baggrunden → 800px (processoren nedskalerer til 224) så
+  // kortet fylder rammen som i kataloget. OCR: servicen ejer nu HELE preprocessingen (cv2
+  // card_crop + perspektiv-deskew, valideret offline 211-korts harness 180→186, +6/-0) →
+  // send et UKROPPET 1300px LOSSLESS PNG. PNG (ikke jpeg) bevarer skarpe kanter til kontur-
+  // detektionen (jpeg blødgjorde kanten → small full-art-firkanter forsvandt). De to stier er
+  // afkoblet så et fejlet CLIP-crop ikke smider det gode OCR-input væk.
   let clipInputBase64 = null
   let ocrInputBase64  = null
   try {
+    ocrInputBase64 = (await sharp(imgBuf).resize(1300).png().toBuffer()).toString('base64')
+  } catch { ocrInputBase64 = normalizedBuf.toString('base64') }
+  try {
     const cropped = await autoCropCard(normalizedBuf)
-    clipInputBase64 = (await sharp(cropped).resize(800, 800,  { fit: 'inside' }).jpeg({ quality: 85 }).toBuffer()).toString('base64')
-    ocrInputBase64  = (await sharp(cropped).resize(1200, 1200, { fit: 'inside' }).jpeg({ quality: 90 }).toBuffer()).toString('base64')
-  } catch { clipInputBase64 = normalizedBuf.toString('base64'); ocrInputBase64 = clipInputBase64 }
+    clipInputBase64 = (await sharp(cropped).resize(800, 800, { fit: 'inside' }).jpeg({ quality: 85 }).toBuffer()).toString('base64')
+  } catch { clipInputBase64 = normalizedBuf.toString('base64') }
 
   // Ét VARMT Railway-kald returnerer BÅDE embedding og OCR. Erstatter Vercels
   // cold-start-Tesseract (som tog ~11s → "server error"). Nu ~1-2s.
