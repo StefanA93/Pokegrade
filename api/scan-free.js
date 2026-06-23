@@ -346,12 +346,13 @@ export default async function handler(req, res) {
   // afkoblet så et fejlet CLIP-crop ikke smider det gode OCR-input væk.
   let clipInputBase64 = null
   let ocrInputBase64  = null
+    // sharp opskalerer små billeder til 1300px (lanczos3) FØR send. Empirisk (benchmark + 5-vs-1
+    // deterministisk test) giver lanczos3-opskaleringen BEDRE nummer-læsbarhed end PIL/bicubic for
+    // små full-art/holo-numre (Pachirisu/Latias/Ledian/Nidorino/Pikachu173 læser kun korrekt MED
+    // opskalering). `withoutEnlargement` blev prøvet for at fixe Slowpoke 81→1 men regresserede de
+    // 5 → revertet. Lektie: harness'ens PIL-resize er IKKE den mest nøjagtige sti for små billeder.
   try {
-    // withoutEnlargement: opskalér ALDRIG (≤1300px sendes uændret) → servicen laver den kanoniske
-    // PIL-resize til 1300, præcis som den validerede harness. Tidligere opskalerede sharp 1200→1300
-    // m. lanczos3 → card_crop fandt en anden kontur end harness (PIL/bicubic) → ledende ciffer tabt
-    // (Slowpoke 81→1). Kun nedskalering af >1300px-billeder bevares.
-    ocrInputBase64 = (await sharp(imgBuf).resize(1300, null, { withoutEnlargement: true }).png().toBuffer()).toString('base64')
+    ocrInputBase64 = (await sharp(imgBuf).resize(1300).png().toBuffer()).toString('base64')
   } catch { ocrInputBase64 = normalizedBuf.toString('base64') }
   try {
     const cropped = await autoCropCard(normalizedBuf)
