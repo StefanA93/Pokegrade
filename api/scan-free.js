@@ -195,6 +195,7 @@ function nameBonus(candName, ocrName) {
   if (!a || !b || b.length < 4) return 0
   if (a === b) return 0.45
   if (a.includes(b) || b.includes(a)) return 0.30
+  if (editLE1(a, b)) return 0.40   // 1-tegns OCR-typo på fuldt navn = stærkt signal (matcher nameSearch's fuzzy-injektion)
   return 0
 }
 
