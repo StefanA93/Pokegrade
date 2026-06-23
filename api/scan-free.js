@@ -347,7 +347,11 @@ export default async function handler(req, res) {
   let clipInputBase64 = null
   let ocrInputBase64  = null
   try {
-    ocrInputBase64 = (await sharp(imgBuf).resize(1300).png().toBuffer()).toString('base64')
+    // withoutEnlargement: opskalér ALDRIG (≤1300px sendes uændret) → servicen laver den kanoniske
+    // PIL-resize til 1300, præcis som den validerede harness. Tidligere opskalerede sharp 1200→1300
+    // m. lanczos3 → card_crop fandt en anden kontur end harness (PIL/bicubic) → ledende ciffer tabt
+    // (Slowpoke 81→1). Kun nedskalering af >1300px-billeder bevares.
+    ocrInputBase64 = (await sharp(imgBuf).resize(1300, null, { withoutEnlargement: true }).png().toBuffer()).toString('base64')
   } catch { ocrInputBase64 = normalizedBuf.toString('base64') }
   try {
     const cropped = await autoCropCard(normalizedBuf)
