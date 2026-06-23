@@ -111,6 +111,19 @@ const sbh = () => ({ apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY
 // server-side, så normaliseret fuzzy-match i JS (mellemrum-/tegn-immun: "GalarianArticuno"
 // == "Galarian Articuno"). Bringer det rigtige kort i puljen selv når CLIP missede det (rank -1).
 const normName = s => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+// Edit-distance ≤1 (én substitution/indsættelse/sletning) — tolererer enkelt OCR-tegnfejl i navnet
+// ("Umezaws"→"Umezawa"). Sikkert: interleave-pre-filteret har allerede narrowet til navne-lignende
+// kort, så ≤1 på det FULDE normaliserede navn giver ingen falske positiver (verificeret offline).
+function editLE1(a, b) {
+  if (a === b) return true
+  const la = a.length, lb = b.length
+  if (Math.abs(la - lb) > 1) return false
+  if (la === lb) { let d = 0; for (let i = 0; i < la; i++) if (a[i] !== b[i] && ++d > 1) return false; return true }
+  const s = la < lb ? a : b, l = la < lb ? b : a   // s kortere, l én længere
+  let i = 0, j = 0, diff = 0
+  while (i < s.length && j < l.length) { if (s[i] === l[j]) { i++; j++ } else { if (++diff > 1) return false; j++ } }
+  return true
+}
 async function nameSearch(game, ocrName) {
   const b = normName(ocrName)
   // Mellemrum/tegn-INSENSITIVT prefix: interleave de første alfanumeriske tegn med wildcards
@@ -126,7 +139,7 @@ async function nameSearch(game, ocrName) {
     { headers: sbh() })
   if (!r.ok) return []
   const rows = await r.json()
-  return rows.filter(c => { const a = normName(c.name); return a && (a === b || a.includes(b) || b.includes(a)) })
+  return rows.filter(c => { const a = normName(c.name); return a && (a === b || a.includes(b) || b.includes(a) || editLE1(a, b)) })
 }
 
 // Nummer-injektion (analog til nameSearch): hent alle tryk med numerator==num OG denominator==total.
