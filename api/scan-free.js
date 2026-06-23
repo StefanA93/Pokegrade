@@ -113,12 +113,16 @@ const sbh = () => ({ apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY
 const normName = s => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '')
 async function nameSearch(game, ocrName) {
   const b = normName(ocrName)
-  const prefix = String(ocrName || '').replace(/[^A-Za-z]/g, '').slice(0, 4)
-  if (b.length < 4 || prefix.length < 3) return []
-  // limit høj: en 4-tegns prefix kan matche mange kort (fx "Gala" = 203) → for lav limit
-  // afkorter før det rigtige tryk. JS-filteret nedenfor narrows til eksakt normaliseret navn.
+  // Mellemrum/tegn-INSENSITIVT prefix: interleave de første alfanumeriske tegn med wildcards
+  // (*t*h*e*w*a*n*d*) så ILIKE matcher uanset mellemrum/komma i kortnavnet ELLER mellemrum droppet
+  // af OCR. Det gamle space-strippede prefix (*TheW*) matchede ALDRIG multi-ord-navne ("The Wandering
+  // Emperor", "Ao, the Dawn Sky") mod det rå navn med mellemrum → navn-injektion fejlede for de fleste
+  // MTG-kort (8-tegns interleave er selektiv: ~6-26 hits, JS-filteret narrows til eksakt normaliseret navn).
+  const chars = b.replace(/[^a-z0-9]/g, '').slice(0, 8)
+  if (b.length < 4 || chars.length < 4) return []
+  const pattern = '*' + chars.split('').join('*') + '*'
   const r = await fetch(
-    `${SUPABASE_URL}/rest/v1/card_catalog?game=eq.${game}&name=ilike.*${prefix}*&number=not.like.product-*&select=id,name,number,phash&limit=1500`,
+    `${SUPABASE_URL}/rest/v1/card_catalog?game=eq.${game}&name=ilike.${pattern}&number=not.like.product-*&select=id,name,number,phash&limit=1500`,
     { headers: sbh() })
   if (!r.ok) return []
   const rows = await r.json()
