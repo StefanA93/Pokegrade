@@ -142,6 +142,41 @@ async function nameSearch(game, ocrName) {
   return rows.filter(c => { const a = normName(c.name); return a && (a === b || a.includes(b) || b.includes(a) || editLE1(a, b)) })
 }
 
+// ─── JP katakana-navnematch ────────────────────────────────────────────────
+// normName strippet til [a-z0-9] → katakana blev TOM → derfor var navn-injektion død for JP.
+// normNameJa beholder katakana og folder small→large-kana + stripper ー/・ → small/large-kana-
+// immun (ティ↔テイ, ッ↔ツ). IDENTISK med SQL-foldningen i name_ja_norm-kolonnen, så OCR-token
+// og katalog-kolonne sammenlignes i samme normalform.
+const SMALL_KANA = { 'ァ': 'ア', 'ィ': 'イ', 'ゥ': 'ウ', 'ェ': 'エ', 'ォ': 'オ', 'ッ': 'ツ', 'ャ': 'ヤ', 'ュ': 'ユ', 'ョ': 'ヨ', 'ヮ': 'ワ', 'ヵ': 'カ', 'ヶ': 'ケ' }
+function normNameJa(s) {
+  let out = ''
+  for (const ch of String(s || '')) {
+    if (ch >= '゠' && ch <= 'ヿ') {       // katakana-blok
+      if (ch === 'ー' || ch === '・') continue       // strip lang-vokal + midt-prik
+      out += SMALL_KANA[ch] || ch
+    }
+  }
+  return out
+}
+
+// JP navn-injektion (analog til nameSearch): bring CLIP-missede JP-kort i puljen via katakana-navnet.
+// OCR'er med støj i BEGGE ender ("コリザードンでマ" for リザードン). name_ja_norm er et SAMMENHÆNGENDE
+// udsnit af det foldede token → generér alle 3-7-tegns understrenge og eksakt-match (IN) mod den
+// foldede kolonne → støj-immun i begge ender og præcis (kun rigtige navne matcher eksakt).
+async function nameSearchJa(game, ocrTexts) {
+  const tokens = [...new Set((ocrTexts || []).map(normNameJa).filter(t => t.length >= 3))]
+  if (!tokens.length) return []
+  const subs = new Set()
+  for (const t of tokens) for (let len = 3; len <= 7; len++) for (let i = 0; i + len <= t.length; i++) subs.add(t.slice(i, i + len))
+  if (!subs.size) return []
+  const inList = [...subs].slice(0, 300).map(s => `"${encodeURIComponent(s)}"`).join(',')
+  const r = await fetch(
+    `${SUPABASE_URL}/rest/v1/card_catalog?game=eq.${game}&name_ja_norm=in.(${inList})&number=not.like.product-*&select=id,name,number,phash,name_ja_norm&limit=600`,
+    { headers: sbh() })
+  if (!r.ok) return []
+  return await r.json()
+}
+
 // Nummer-injektion (analog til nameSearch): hent alle tryk med numerator==num OG denominator==total.
 // KRITISK gate (kaldes kun når BÅDE nummer OG setTotal er læst = høj konfidens): på holo/full-art/
 // regeltekst-fotos fejler navne-parseren ofte (læser angrebstekst), så det rigtige kort er hverken i
@@ -187,6 +222,19 @@ async function fetchEmbeddings(ids) {
   return out
 }
 
+// Hent foldet name_ja_norm for kandidat-id'er (JP) → så nameBonusJa kan score HELE puljen
+// (CLIP- og nummer-injicerede kort, ikke kun navn-injicerede). Ét kald, kun for pokemonjp.
+async function fetchNameJaNorm(ids) {
+  if (!ids.length) return {}
+  const r = await fetch(
+    `${SUPABASE_URL}/rest/v1/card_catalog?id=in.(${ids.map(id => `"${id}"`).join(',')})&select=id,name_ja_norm`,
+    { headers: sbh() })
+  if (!r.ok) return {}
+  const out = {}
+  for (const row of await r.json()) out[row.id] = row.name_ja_norm ?? null
+  return out
+}
+
 // Per-kandidat navn-bonus (analog til numberBonus): boost et kort hvis dets navn matcher OCR-navnet.
 // Krydsvalidering: navn-match (+0.45) + nummer-match (numberBonus +0.55) → ~1.0 → vinder sikkert.
 function nameBonus(candName, ocrName) {
@@ -196,6 +244,17 @@ function nameBonus(candName, ocrName) {
   if (a === b) return 0.45
   if (a.includes(b) || b.includes(a)) return 0.30
   if (editLE1(a, b)) return 0.40   // 1-tegns OCR-typo på fuldt navn = stærkt signal (matcher nameSearch's fuzzy-injektion)
+  return 0
+}
+
+// JP-variant: sammenlign kandidatens foldede name_ja_norm mod de foldede OCR-katakana-tokens.
+function nameBonusJa(candNameJaNorm, ocrJaTokens) {
+  const a = candNameJaNorm
+  if (!a || a.length < 3 || !ocrJaTokens?.length) return 0
+  for (const t of ocrJaTokens) {
+    if (t === a) return 0.45
+    if (t.includes(a) || a.includes(t)) return 0.30
+  }
   return 0
 }
 
@@ -393,6 +452,10 @@ export default async function handler(req, res) {
   // OCR: foretræk PaddleOCR-servicen (læser nummer OG navn); fald tilbage til Railways Tesseract.
   const ocrResult = ocrService ?? railway?.ocr ?? null
   const ocrName   = ocrService?.name ?? null
+  // JP: foldede katakana-tokens fra ALLE OCR-linjer (robust mod hvilken linje navnet lander i)
+  const ocrJaTokens = safeGame === 'pokemonjp'
+    ? [...new Set((ocrService?.texts ?? []).map(normNameJa).filter(t => t.length >= 3))]
+    : []
 
   const clientFallback = (clientEmbedding && Array.isArray(clientEmbedding) && clientEmbedding.length === 512)
     ? clientEmbedding : null
@@ -454,9 +517,13 @@ export default async function handler(req, res) {
   // Injicér navn-matchede katalog-kort. KRITISK: på holo-fotos er det rigtige kort ofte CLIP
   // rank -1 (slet ikke i puljen) — en bonus kan ikke booste et fraværende kort. Navn-søgning
   // henter alle tryk af det OCR-læste navn ind; numberBonus vælger så det rigtige tryk (krydsvalidering).
-  if (ocrName) {
+  if (ocrName || ocrJaTokens.length) {
     const existing = new Set(candidatePool.map(c => c.id))
-    const nameHits = (await nameSearch(safeGame, ocrName).catch(() => [])).filter(h => !existing.has(h.id))
+    // JP: match katakana-navnet mod name_ja_norm; ellers det engelske navn mod name.
+    const nameHits = (safeGame === 'pokemonjp'
+      ? await nameSearchJa(safeGame, ocrService?.texts ?? []).catch(() => [])
+      : await nameSearch(safeGame, ocrName).catch(() => [])
+    ).filter(h => !existing.has(h.id))
     // CLIP-rank de injicerede kort: ægte cosine mod scan-embeddingen (ikke clipSim=0). Distinkt-art-
     // rarities (SIR/IR/secret) vinder så visuelt blandt samme-navn-tryk; numberBonus afgør same-art.
     const embMap = activeEmbedding ? await fetchEmbeddings(nameHits.map(h => h.id)).catch(() => ({})) : {}
@@ -465,6 +532,7 @@ export default async function handler(req, res) {
       const emb = embMap[hch.id]
       candidatePool.push({
         id: hch.id, name: hch.name ?? null, number: hch.number ?? null, phash: hch.phash ?? null,
+        nameJaNorm: hch.name_ja_norm ?? null,
         clipSim: emb ? cosineSim(activeEmbedding, emb) : 0,
         phashDist: (uploadedPhash && hch.phash) ? hammingDist(uploadedPhash, hch.phash) : null,
       })
@@ -501,13 +569,23 @@ export default async function handler(req, res) {
     })
   }
 
+  // JP: hent foldet name_ja_norm for de kandidater der mangler det (CLIP-/nummer-injicerede) → så
+  // nameBonusJa kan score HELE puljen, ikke kun de navn-injicerede. Ét kald, kun for pokemonjp.
+  if (safeGame === 'pokemonjp' && ocrJaTokens.length) {
+    const need = candidatePool.filter(c => c.nameJaNorm === undefined).map(c => c.id)
+    const njMap = await fetchNameJaNorm(need).catch(() => ({}))
+    for (const c of candidatePool) if (c.nameJaNorm === undefined) c.nameJaNorm = njMap[c.id] ?? null
+  }
+
   // Kombineret scoring: CLIP + phash + per-kandidat OCR number-bonus
   const w = PHASH_SCORE_WEIGHTS[safeGame] ?? PHASH_SCORE_WEIGHTS.default
   const scored = candidatePool.map(c => {
     const clip   = c.clipSim
     const ph     = c.phashDist !== null ? 1 - c.phashDist / 64 : 0
     const number = numberBonus(c.number, ocrResult)
-    const name   = nameBonus(c.name, ocrName)   // navn+nummer der begge matcher = krydsvalideret → ~1.0
+    const name   = safeGame === 'pokemonjp'
+      ? nameBonusJa(c.nameJaNorm, ocrJaTokens)
+      : nameBonus(c.name, ocrName)   // navn+nummer der begge matcher = krydsvalideret → ~1.0
     const total  = usedClip
       ? clip * w.clip + ph * w.phash + number + name
       : ph * 0.75 + number + name

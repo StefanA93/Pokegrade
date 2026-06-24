@@ -15,6 +15,11 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Bag OCR-modellerne ind i imaget (EN + japansk) → ingen runtime-download ved cold start.
+# Japansk-modellen er PP-OCR mobile/lite-default (samme størrelsesorden som EN). Egen layer:
+# afhænger kun af requirements, så kode-ændringer (COPY . .) genbruger cachen.
+RUN python -c "from paddleocr import PaddleOCR; PaddleOCR(use_angle_cls=False, lang='en', show_log=False); PaddleOCR(use_angle_cls=False, lang='japan', show_log=False)"
+
 COPY . .
 
 # Railway injicerer $PORT; shell-form CMD så variablen ekspanderes.

@@ -47,6 +47,7 @@ NAME_STOP = re.compile(
 
 app = FastAPI()
 _ocr = None
+_ocr_ja = None
 _ready = False
 
 
@@ -60,6 +61,19 @@ def get_ocr():
                          enable_mkldnn=True, cpu_threads=4)
         _ready = True
     return _ocr
+
+
+def get_ocr_ja():
+    # Japansk genkendelses-model (PP-OCR mobile/lite-default = samme størrelsesorden som EN-modellen).
+    # LAZY: loades først ved første pokemonjp-scan → ingen RAM-omkostning før et JP-kort faktisk skannes,
+    # og EN-only-trafik kører uændret med kun EN-modellen i hukommelsen. Modellen er baked ind i Docker-
+    # imaget (se Dockerfile) → ingen runtime-download ved cold start. Læser katakana-kortnavn + nummeret.
+    global _ocr_ja
+    if _ocr_ja is None:
+        from paddleocr import PaddleOCR
+        _ocr_ja = PaddleOCR(use_angle_cls=False, lang="japan", show_log=False,
+                            enable_mkldnn=True, cpu_threads=4)
+    return _ocr_ja
 
 
 @app.on_event("startup")
@@ -86,8 +100,9 @@ def _decode(data_url: str) -> Image.Image:
     return img
 
 
-def _run(img: Image.Image) -> list[str]:
-    res = get_ocr().ocr(np.array(img))
+def _run(img: Image.Image, game: str = "pokemon") -> list[str]:
+    eng = get_ocr_ja() if game == "pokemonjp" else get_ocr()
+    res = eng.ocr(np.array(img))
     return [line[1][0] for page in (res or []) for line in (page or [])]
 
 
@@ -234,6 +249,20 @@ def _guess_name(texts: list[str]) -> str | None:
     return None
 
 
+_KATA = re.compile(r"[゠-ヿ]{2,}")
+
+
+def _guess_name_ja(texts: list[str]) -> str | None:
+    # JP: kortnavnet er katakana. Returnér den længste katakana-streng i de øverste linjer
+    # (scan-free matcher dog mod HELE texts mod name_ja, så dette er kun et bekvemt enkelt-navn).
+    best = None
+    for t in texts[:10]:
+        for m in _KATA.findall(t):
+            if best is None or len(m) > len(best):
+                best = m
+    return best
+
+
 @app.get("/health")
 def health():
     return {"status": "ok", "model": "ready" if _ready else "loading"}
@@ -256,12 +285,13 @@ def ocr(req: OcrReq, authorization: str = Header(default="")):
         pass
 
     # Pass 1: hele (deskewede) kortet → navn (+ ofte nummer for regulære kort).
-    texts = _run(img)
+    texts = _run(img, game)
     # Nummer: multi-pass VOTING over flere preprocessing-varianter af nummer-zonen → stabilt
     # (PaddleOCR's detektion af det lille collector-nummer var intermittent: 214↔null, 106↔"6").
     num = _read_number(img, game, texts)
 
-    return {**num, "name": _guess_name(texts), "texts": texts}
+    name = _guess_name_ja(texts) if game == "pokemonjp" else _guess_name(texts)
+    return {**num, "name": name, "texts": texts}
 
 
 def _up(g: Image.Image, width: int) -> Image.Image:
@@ -290,7 +320,7 @@ def _number_variants(img: Image.Image) -> list[Image.Image]:
 # mest komplet (setTotal/kode) → højest num-værdi (3-cifret > misread 1-cifret som mistede ledende ciffer).
 def _read_number(img: Image.Image, game: str, full_texts: list[str]) -> dict:
     votes = Counter()
-    for texts in [full_texts] + [_run(v) for v in _number_variants(img)]:
+    for texts in [full_texts] + [_run(v, game) for v in _number_variants(img)]:
         p = _parse_number(texts, game)
         if p["number"] is not None:
             votes[(p["number"], p["setTotal"], p["isCode"])] += 1
