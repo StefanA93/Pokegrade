@@ -148,13 +148,16 @@ async function nameSearch(game, ocrName) {
 // immun (ティ↔テイ, ッ↔ツ). IDENTISK med SQL-foldningen i name_ja_norm-kolonnen, så OCR-token
 // og katalog-kolonne sammenlignes i samme normalform.
 const SMALL_KANA = { 'ァ': 'ア', 'ィ': 'イ', 'ゥ': 'ウ', 'ェ': 'エ', 'ォ': 'オ', 'ッ': 'ツ', 'ャ': 'ヤ', 'ュ': 'ユ', 'ョ': 'ヨ', 'ヮ': 'ワ', 'ヵ': 'カ', 'ヶ': 'ケ' }
+// Trainer/item-navne er kanji+hiragana+katakana (博士の研究, ふしぎなアメ) — ikke kun katakana som Pokémon.
+// Behold alle 3 scripts; normalisér hiragana→katakana (script-variant-immun) + fold small-kana; ー/・ falder
+// udenfor og droppes. Bagud-kompatibel: rene katakana-navne (Pokémon) folder identisk med før.
 function normNameJa(s) {
   let out = ''
   for (const ch of String(s || '')) {
-    if (ch >= '゠' && ch <= 'ヿ') {       // katakana-blok
-      if (ch === 'ー' || ch === '・') continue       // strip lang-vokal + midt-prik
-      out += SMALL_KANA[ch] || ch
-    }
+    const cp = ch.codePointAt(0)
+    if (cp >= 0x3041 && cp <= 0x3096) { const k = String.fromCodePoint(cp + 0x60); out += SMALL_KANA[k] || k }  // hiragana→katakana
+    else if (cp >= 0x30A1 && cp <= 0x30FA) { out += SMALL_KANA[ch] || ch }                                       // katakana
+    else if (cp >= 0x4E00 && cp <= 0x9FFF) { out += ch }                                                          // kanji
   }
   return out
 }
