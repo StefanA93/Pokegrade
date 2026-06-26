@@ -1430,7 +1430,7 @@ function FreeScanResult({ result, game, frontImg, user, onSave, onSwitchToAI }) 
                       border: `1.5px solid ${on ? COLORS.gold : COLORS.border}`,
                     }}>
                       <span style={{ fontSize: 12, fontWeight: 600, color: on ? COLORS.gold : COLORS.muted }}>{v.label}</span>
-                      <span style={{ fontSize: 10, fontWeight: 700, color: vp ? (on ? COLORS.gold : COLORS.muted) : '#444' }}>{vp ? `€${Number(vp).toFixed(2)}` : '—'}</span>
+                      <span style={{ fontSize: 10, fontWeight: 700, color: vp ? (on ? COLORS.gold : COLORS.muted) : '#444' }}>{vp ? `${v.price?.currency === 'USD' ? '$' : '€'}${Number(vp).toFixed(2)}` : '—'}</span>
                     </button>
                   )
                 })}
@@ -1462,7 +1462,7 @@ function FreeScanResult({ result, game, frontImg, user, onSave, onSwitchToAI }) 
               <div key={label} style={{ background: '#0a0a14', borderRadius: 10, padding: '10px 8px', textAlign: 'center', border: `1px solid ${COLORS.border}` }}>
                 <div style={{ fontSize: 10, color: COLORS.muted, marginBottom: 3, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.4 }}>{label}</div>
                 <div style={{ fontSize: 15, fontWeight: 900, color: val ? COLORS.gold : COLORS.muted }}>
-                  {val ? `€${Number(val).toFixed(2)}` : '—'}
+                  {val ? `${activePrice?.currency === 'USD' ? '$' : '€'}${Number(val).toFixed(2)}` : '—'}
                 </div>
               </div>
             ))}
