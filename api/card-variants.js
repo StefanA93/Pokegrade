@@ -54,6 +54,8 @@ function priceObj(row) {
     sell: row.price_sell != null ? Number(row.price_sell) : null,
     trend: row.price_trend != null ? Number(row.price_trend) : null,
     cm_url: row.cm_url || null,
+    // Most prices are Cardmarket EUR; pokemonjp/dragonball (tcgplayer) and lorcana foil (lorcast) are USD.
+    currency: row.source === 'cardmarket' ? 'EUR' : 'USD',
   }
 }
 
@@ -136,7 +138,7 @@ export default async function handler(req) {
     const ids = [...new Set(options.map((o) => o.id))]
     const priceRows = await pg(
       `card_prices?catalog_id=in.(${ids.map((x) => encodeURIComponent(x)).join(',')})` +
-        `&select=catalog_id,finish,price_avg7,price_avg30,price_low,price_sell,price_trend,cm_url`
+        `&select=catalog_id,finish,price_avg7,price_avg30,price_low,price_sell,price_trend,cm_url,source`
     )
     const byKey = new Map() // `${catalog_id}|${finish}` → row
     const byId = new Map() // catalog_id → preferred row (Normal first)
