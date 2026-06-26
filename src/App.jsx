@@ -1286,8 +1286,28 @@ function FreeScanResult({ result, game, frontImg, user, onSave, onSwitchToAI }) 
   const [saved, setSaved] = useState(false)
   const [saveError, setSaveError] = useState('')
 
+  // Lag 2 — unified variant picker (rows + finishes models, with card_prices label bridge)
+  const [variants, setVariants] = useState(null)
+  const [variantIdx, setVariantIdx] = useState(0)
+  useEffect(() => {
+    if (!selected?.id || !game) { setVariants(null); return }
+    let active = true
+    setVariants(null); setVariantIdx(0)
+    fetch(`/api/card-variants?game=${encodeURIComponent(game)}&id=${encodeURIComponent(selected.id)}`)
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => { if (active && d?.variants?.length) setVariants(d.variants) })
+      .catch(() => {})
+    return () => { active = false }
+  }, [selected?.id, game])
+
+  const chosen = variants ? variants[variantIdx] : null
   const priceRow = (selected?.card_prices || []).find(p => p.finish === finish) || {}
-  const price = priceRow.price_avg7 || selected?.price_eur || null
+  const activePrice = chosen?.price
+    ? chosen.price
+    : { avg7: priceRow.price_avg7 ?? selected?.price_avg7, avg30: priceRow.price_avg30 ?? selected?.price_avg30, low: priceRow.price_low ?? selected?.price_eur_low, sell: priceRow.price_sell, cm_url: priceRow.cm_url }
+  const activeId = chosen?.id || selected?.id
+  const activeFinish = chosen?.label || finish
+  const price = activePrice?.avg7 ?? activePrice?.sell ?? activePrice?.low ?? selected?.price_eur ?? null
 
   async function save() {
     if (!selected) return
@@ -1296,17 +1316,17 @@ function FreeScanResult({ result, game, frontImg, user, onSave, onSwitchToAI }) 
       user_id:       user.id,
       name:          selected.name,
       game,
-      finish,
+      finish:        activeFinish,
       value:         price,
-      price_avg7:    priceRow.price_avg7  || null,
-      price_avg30:   priceRow.price_avg30 || null,
-      price_low:     priceRow.price_low   || null,
-      price_sell:    priceRow.price_sell  || null,
-      cardmarket_url: priceRow.cm_url     || selected.cardmarket_url || null,
-      image_url:     selected.image_url   || null,
+      price_avg7:    activePrice?.avg7  ?? null,
+      price_avg30:   activePrice?.avg30 ?? null,
+      price_low:     activePrice?.low   ?? null,
+      price_sell:    activePrice?.sell  ?? null,
+      cardmarket_url: activePrice?.cm_url || selected.cardmarket_url || null,
+      image_url:     chosen?.image_url || selected.image_url || null,
       card_number:   selected.number      || null,
       set_name:      selected.set_name    || null,
-      catalog_id:    selected.id          || null,
+      catalog_id:    activeId             || null,
     }
     let { error } = await supabase.from('cards').insert({ ...base, rarity: selected.rarity || null })
     if (error?.code === '42703') {
@@ -1394,8 +1414,29 @@ function FreeScanResult({ result, game, frontImg, user, onSave, onSwitchToAI }) 
             </div>
           </div>
 
-          {/* Finish selector */}
-          {(selected.finishTypes || ['Normal']).length > 1 && (
+          {/* Variant selector (Lag 2) — unified rows + finishes, each with its EU price */}
+          {variants && variants.length > 1 ? (
+            <div style={{ padding: '0 16px 12px' }}>
+              <div style={{ fontSize: 11, color: COLORS.muted, marginBottom: 6, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 }}>Variant</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {variants.map((v, i) => {
+                  const vp = v.price?.avg7 ?? v.price?.sell ?? v.price?.low
+                  const on = i === variantIdx
+                  return (
+                    <button key={`${v.id}|${v.label}|${i}`} onClick={() => setVariantIdx(i)} style={{
+                      display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 2,
+                      padding: '6px 10px', borderRadius: 8, cursor: 'pointer', textAlign: 'left',
+                      background: on ? `${COLORS.gold}18` : 'transparent',
+                      border: `1.5px solid ${on ? COLORS.gold : COLORS.border}`,
+                    }}>
+                      <span style={{ fontSize: 12, fontWeight: 600, color: on ? COLORS.gold : COLORS.muted }}>{v.label}</span>
+                      <span style={{ fontSize: 10, fontWeight: 700, color: vp ? (on ? COLORS.gold : COLORS.muted) : '#444' }}>{vp ? `€${Number(vp).toFixed(2)}` : '—'}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          ) : (selected.finishTypes || ['Normal']).length > 1 ? (
             <div style={{ padding: '0 16px 12px' }}>
               <div style={{ fontSize: 11, color: COLORS.muted, marginBottom: 6, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 }}>Finish</div>
               <div style={{ display: 'flex', gap: 6 }}>
@@ -1409,14 +1450,14 @@ function FreeScanResult({ result, game, frontImg, user, onSave, onSwitchToAI }) 
                 ))}
               </div>
             </div>
-          )}
+          ) : null}
 
           {/* Prices */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, padding: '0 16px 16px' }}>
             {[
-              { label: '7d avg', val: priceRow.price_avg7 || selected.price_avg7 },
-              { label: '30d avg', val: priceRow.price_avg30 || selected.price_avg30 },
-              { label: 'Low', val: priceRow.price_low || selected.price_eur_low },
+              { label: '7d avg', val: activePrice?.avg7 },
+              { label: '30d avg', val: activePrice?.avg30 },
+              { label: 'Low', val: activePrice?.low },
             ].map(({ label, val }) => (
               <div key={label} style={{ background: '#0a0a14', borderRadius: 10, padding: '10px 8px', textAlign: 'center', border: `1px solid ${COLORS.border}` }}>
                 <div style={{ fontSize: 10, color: COLORS.muted, marginBottom: 3, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.4 }}>{label}</div>
