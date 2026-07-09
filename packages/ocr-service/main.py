@@ -218,7 +218,7 @@ def _parse_number(texts: list[str], game: str) -> dict:
 
     if is_code_game:
         for t in joined:
-            m = re.search(r"([A-Z]{2,6}\d{0,3}-[A-Z]{0,2}\d{2,4})", t.upper())
+            m = re.search(r"([A-Z0-9]{2,6}-[A-Z]{0,4}\d{1,4})", t.upper())
             if m:
                 return {"number": m.group(1), "setTotal": None, "isCode": True}
 
