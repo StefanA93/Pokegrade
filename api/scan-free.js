@@ -198,6 +198,24 @@ async function numberSearch(game, num, total) {
   })
 }
 
+// Kode-injektion (CODE_GAMES: yugioh/dbs/onepiece). Set-koden identificerer BÅDE kortet OG trykket
+// unikt → henter de(t) kort ind hvis kode matcher OCR'ens (region-agnostisk: LOB-EN005 ~ LOB-005).
+// Løser modern-kollaps (CLIP forkert kort) + same-art print-miss: en bonus kan ikke booste et kort
+// der ikke er i puljen, men CLIP-navnepuljen misser tit det rigtige tryk/kort på foil-tunge YGO-kort.
+async function codeSearch(game, code) {
+  const m = String(code ?? '').toUpperCase().match(/^([A-Z0-9]+)-[A-Z]*?(\d+)$/)
+  if (!m) return []
+  const prefix = m[1], want = String(parseInt(m[2], 10))
+  const r = await fetch(
+    `${SUPABASE_URL}/rest/v1/card_catalog?game=eq.${game}&number=like.${encodeURIComponent(prefix + '-*')}&number=not.like.product-*&select=id,name,number,phash&limit=200`,
+    { headers: sbh() })
+  if (!r.ok) return []
+  return (await r.json()).filter(c => {
+    const cm = String(c.number ?? '').toUpperCase().match(/^[A-Z0-9]+-[A-Z]*?(\d+)$/)
+    return cm && String(parseInt(cm[1], 10)) === want
+  })
+}
+
 // Cosine-similarity i JS (samme mål som match_cards' 1-(embedding<=>query)) — til CLIP-ranking
 // af navn-injicerede kort der ligger UDEN FOR CLIP-poolen (top-30).
 function cosineSim(a, b) {
@@ -561,6 +579,24 @@ export default async function handler(req, res) {
       })
     }
     scanDiag.numHits = numHits.length
+  }
+
+  // Kode-injektion (CODE_GAMES): den læste set-kode pinner både rigtigt KORT og rigtigt TRYK.
+  // Gated på isCode + læst kode. numberBonus giver de kode-matchede +0.55 → vinder trods CLIP-
+  // forvirring; CLIP-cosine bryder tie blandt same-kode-rarity-varianter.
+  if (ocrResult?.isCode && ocrNum) {
+    const existing = new Set(candidatePool.map(c => c.id))
+    const codeHits = (await codeSearch(safeGame, ocrNum).catch(() => [])).filter(h => !existing.has(h.id))
+    const embMap = activeEmbedding ? await fetchEmbeddings(codeHits.map(h => h.id)).catch(() => ({})) : {}
+    for (const hch of codeHits) {
+      const emb = embMap[hch.id]
+      candidatePool.push({
+        id: hch.id, name: hch.name ?? null, number: hch.number ?? null, phash: hch.phash ?? null,
+        clipSim: emb ? cosineSim(activeEmbedding, emb) : 0,
+        phashDist: (uploadedPhash && hch.phash) ? hammingDist(uploadedPhash, hch.phash) : null,
+      })
+    }
+    scanDiag.codeHits = codeHits.length
   }
 
   if (!candidatePool.length) {
