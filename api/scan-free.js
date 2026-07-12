@@ -198,6 +198,13 @@ async function numberSearch(game, num, total) {
   })
 }
 
+// Region-agnostisk set-kode-nøgle: PREFIX-<region?><digits> → "PREFIX|<int>". Immun mod region-
+// varianter OG OCR-region-misreads (LOB-EN005 ~ LOB-005 ~ LOB-O05 ~ LOB-FR005 → alle "LOB|5").
+function codeKeyN(s) {
+  const m = String(s ?? '').toUpperCase().match(/^([A-Z0-9]+)-[A-Z]*?(\d+)$/)
+  return m ? `${m[1]}|${parseInt(m[2], 10)}` : null
+}
+
 // Kode-injektion (CODE_GAMES: yugioh/dbs/onepiece). Set-koden identificerer BÅDE kortet OG trykket
 // unikt → henter de(t) kort ind hvis kode matcher OCR'ens (region-agnostisk: LOB-EN005 ~ LOB-005).
 // Løser modern-kollaps (CLIP forkert kort) + same-art print-miss: en bonus kan ikke booste et kort
@@ -349,8 +356,9 @@ function numberBonus(candNumber, ocr) {
   if (!ocr?.number) return 0
   const cand = parseCardNum(candNumber)
   if (ocr.isCode) {
-    const a = cand.raw.replace(/[^A-Z0-9]/g, '')
-    const b = String(ocr.number).toUpperCase().replace(/[^A-Z0-9]/g, '')
+    // Region-agnostisk: OCR læser tit regionen forkert/mangelfuldt ("PSV-O11"/"BLAR-ENO54" vs
+    // katalogets "PSV-EN011"/"BLAR-EN054") → sammenlign KUN set-prefix + trailing-nummer.
+    const a = codeKeyN(cand.raw), b = codeKeyN(ocr.number)
     return a && b && a === b ? 0.55 : 0
   }
   if (cand.num == null || cand.num !== String(ocr.number)) return 0
