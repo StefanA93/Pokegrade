@@ -218,9 +218,12 @@ def _parse_number(texts: list[str], game: str) -> dict:
 
     if is_code_game:
         for t in joined:
-            m = re.search(r"([A-Z0-9]{2,6}-[A-Z]{0,4}\d{1,4})", t.upper())
+            m = re.search(r"([A-Z0-9]{2,6})-([A-Z]{0,4})([0-9OISB]{1,4})", t.upper())
             if m:
-                return {"number": m.group(1), "setTotal": None, "isCode": True}
+                # normalisér OCR-tal-forvirring KUN i hale-nummeret (O→0, I→1, S→5, B→8); prefix+region bevaret
+                tail = m.group(3).translate(str.maketrans("OISB", "0158"))
+                if any(ch.isdigit() for ch in tail):
+                    return {"number": f"{m.group(1)}-{m.group(2)}{tail}", "setTotal": None, "isCode": True}
 
     # slash-format NNN/NNN
     for t in joined:
@@ -314,12 +317,18 @@ def _number_variants(img: Image.Image, game: str = "") -> list[Image.Image]:
         _up(ac(0.45, 0.82, 1.0, 1.0), 1500),     # bund-højre bredt
         _up(ac(0.0, 0.82, 1.0, 0.99), 1500),     # fuld-bredde bund-bånd (venstre → højre)
     ]
-    # CODE_GAMES (YGO/DBS/OP): set-koden sidder lige UNDER artwork'et, HØJRE side (~0.70-0.80 y) —
-    # IKKE i bunden som Pokemons collector-nummer. Modern foil-kort (Quarter Century Secret Rare) har
-    # koden på lav-kontrast prismatisk foil → kraftig upscale (2000) + autocontrast på det smalle bånd.
+    # CODE_GAMES (YGO/DBS/OP): set-koden sidder lige UNDER art-rammen, HØJRE side (~0.60-0.70 y) —
+    # HØJERE end effekt-tekstboksen (0.68-0.80 rammer effekt-teksten, ikke koden). Visuelt verificeret.
+    # Modern foil (Quarter Century): adaptiv threshold skiller den mørke ink fra den lyse prismatiske foil.
     if game in CODE_GAMES:
-        variants.append(_up(ac(0.45, 0.68, 1.0, 0.80), 2000))   # bredt kode-bånd under art
-        variants.append(_up(ac(0.55, 0.71, 1.0, 0.79), 2200))   # tæt højre-hjørne-kode, tung upscale
+        def _code(x0, y0, x1, y1, thresh):
+            c = np.array(img.crop((int(w * x0), int(h * y0), int(w * x1), int(h * y1))).convert("L"))
+            c = cv2.resize(c, None, fx=4, fy=4, interpolation=cv2.INTER_CUBIC)
+            if thresh:
+                c = cv2.adaptiveThreshold(c, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 41, 13)
+            return Image.fromarray(c)
+        variants.append(_code(0.48, 0.61, 0.98, 0.70, False))   # gray-crop på kode-linjen
+        variants.append(_code(0.45, 0.60, 1.0, 0.695, True))    # adaptiv threshold (foil-kort)
     return variants
 
 
