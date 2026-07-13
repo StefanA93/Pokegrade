@@ -6,7 +6,7 @@ import { execSync } from 'child_process'
 // code+name (the strong metric, analogous to num+total for slash games). Run after warming Railway
 // (OCR + CLIP services) and deploying the code-regex fix.
 
-const INFILE = '_ebay/raw_yugioh.jsonl'
+const INFILE = process.argv[2] || '_ebay/raw_yugioh.jsonl'
 const BYPASS = 'm8N3Uz2ILE3TvJPPbrApokT6OWvVAlOC'
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36'
 const DEPLOY = execSync('npx vercel ls --yes 2>nul || npx vercel ls --yes', { encoding: 'utf8' }).match(/https:\/\/pokegrade-[a-z0-9]+-stefana93\.vercel\.app/)[0]
