@@ -198,10 +198,16 @@ async function numberSearch(game, num, total) {
   })
 }
 
+// Kollaps OCR-tegn-forveksling til kanonisk form. Anvendt på BEGGE sider (OCR-kode + katalog-kode)
+// → forveksling-tolerant: foil forvrænger digit-prefixer (RA01→RAOI/RAOT/RAOS). Fordi katalog-koden
+// kanoniseres ens, matcher både digit-prefixer (RA01) OG bogstav-prefixer (IOC→10C på begge sider).
+const _CANON = { O: '0', I: '1', S: '5', B: '8', Z: '7', T: '1' }
+function codeCanon(s) { return String(s ?? '').toUpperCase().replace(/[OISBZT]/g, c => _CANON[c]) }
+
 // Region-agnostisk set-kode-nøgle: PREFIX-<region?><digits> → "PREFIX|<int>". Immun mod region-
-// varianter OG OCR-region-misreads (LOB-EN005 ~ LOB-005 ~ LOB-O05 ~ LOB-FR005 → alle "LOB|5").
+// varianter OG OCR-tegn-forveksling (LOB-EN005 ~ LOB-005 ~ LOB-O05 ~ RA01 ~ RAOI → kanonisk match).
 function codeKeyN(s) {
-  const m = String(s ?? '').toUpperCase().match(/^([A-Z0-9]+)-[A-Z]*?(\d+)$/)
+  const m = codeCanon(s).match(/^([A-Z0-9]+)-[A-Z]*?(\d+)$/)
   return m ? `${m[1]}|${parseInt(m[2], 10)}` : null
 }
 
@@ -210,17 +216,19 @@ function codeKeyN(s) {
 // Løser modern-kollaps (CLIP forkert kort) + same-art print-miss: en bonus kan ikke booste et kort
 // der ikke er i puljen, men CLIP-navnepuljen misser tit det rigtige tryk/kort på foil-tunge YGO-kort.
 async function codeSearch(game, code) {
-  const m = String(code ?? '').toUpperCase().match(/^([A-Z0-9]+)-[A-Z]*?(\d+)$/)
-  if (!m) return []
-  const prefix = m[1], want = String(parseInt(m[2], 10))
+  const want = codeKeyN(code)
+  if (!want) return []
+  const raw = String(code).toUpperCase().match(/^([A-Z0-9]+)-/)
+  const can = codeCanon(code).match(/^([A-Z0-9]+)-/)
+  // søg BÅDE rå OG kanonisk prefix (digit-prefix RAOI vs RA01, bogstav-prefix IOC) → filtrér på kanonisk nøgle
+  const prefixes = [...new Set([raw && raw[1], can && can[1]].filter(Boolean))]
+  if (!prefixes.length) return []
+  const orFilter = prefixes.map(p => `number.like.${p}-*`).join(',')
   const r = await fetch(
-    `${SUPABASE_URL}/rest/v1/card_catalog?game=eq.${game}&number=like.${encodeURIComponent(prefix + '-*')}&number=not.like.product-*&select=id,name,number,phash&limit=200`,
+    `${SUPABASE_URL}/rest/v1/card_catalog?game=eq.${game}&or=(${orFilter})&number=not.like.product-*&select=id,name,number,phash&limit=300`,
     { headers: sbh() })
   if (!r.ok) return []
-  return (await r.json()).filter(c => {
-    const cm = String(c.number ?? '').toUpperCase().match(/^[A-Z0-9]+-[A-Z]*?(\d+)$/)
-    return cm && String(parseInt(cm[1], 10)) === want
-  })
+  return (await r.json()).filter(c => codeKeyN(c.number) === want)
 }
 
 // Cosine-similarity i JS (samme mål som match_cards' 1-(embedding<=>query)) — til CLIP-ranking
