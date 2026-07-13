@@ -301,7 +301,7 @@ def _up(g: Image.Image, width: int) -> Image.Image:
 
 # Flere preprocessing-varianter af nummer-zonen — forskellige greb (upscale/sharpen/edge/tæt-crop)
 # giver PaddleOCR flere chancer for at fange det thin ledende ciffer; voting vælger konsensus.
-def _number_variants(img: Image.Image) -> list[Image.Image]:
+def _number_variants(img: Image.Image, game: str = "") -> list[Image.Image]:
     w, h = img.size
     def ac(x0, y0, x1, y1):
         return ImageOps.autocontrast(img.crop((int(w * x0), int(h * y0), int(w * x1), int(h * y1))).convert("L"))
@@ -309,18 +309,25 @@ def _number_variants(img: Image.Image) -> list[Image.Image]:
     # som læser FLERE numre korrekt (180 vs 178) end det gamle 6-pass-sæt, med -33% CPU/RAM. Det gamle
     # bund-bånd (`og`) bidrog 0 unikke kort = ren dødvægt → fjernet. Collector-nummeret sidder bund-HØJRE
     # (full-art/Prime/LvX/secret-hjørne), bund-bredt, ELLER bund-venstre (dækket af det brede bånd + fuld-kort).
-    return [
+    variants = [
         _up(ac(0.62, 0.80, 1.0, 0.99), 1500),   # yderste bund-HØJRE — hjørne-nummer (M Venusaur, Donphan Prime)
         _up(ac(0.45, 0.82, 1.0, 1.0), 1500),     # bund-højre bredt
         _up(ac(0.0, 0.82, 1.0, 0.99), 1500),     # fuld-bredde bund-bånd (venstre → højre)
     ]
+    # CODE_GAMES (YGO/DBS/OP): set-koden sidder lige UNDER artwork'et, HØJRE side (~0.70-0.80 y) —
+    # IKKE i bunden som Pokemons collector-nummer. Modern foil-kort (Quarter Century Secret Rare) har
+    # koden på lav-kontrast prismatisk foil → kraftig upscale (2000) + autocontrast på det smalle bånd.
+    if game in CODE_GAMES:
+        variants.append(_up(ac(0.45, 0.68, 1.0, 0.80), 2000))   # bredt kode-bånd under art
+        variants.append(_up(ac(0.55, 0.71, 1.0, 0.79), 2200))   # tæt højre-hjørne-kode, tung upscale
+    return variants
 
 
 # Stem på nummeret på tværs af fuld-kort + nummer-varianter. Tie-break: flest stemmer →
 # mest komplet (setTotal/kode) → højest num-værdi (3-cifret > misread 1-cifret som mistede ledende ciffer).
 def _read_number(img: Image.Image, game: str, full_texts: list[str]) -> dict:
     votes = Counter()
-    for texts in [full_texts] + [_run(v, game) for v in _number_variants(img)]:
+    for texts in [full_texts] + [_run(v, game) for v in _number_variants(img, game)]:
         p = _parse_number(texts, game)
         if p["number"] is not None:
             votes[(p["number"], p["setTotal"], p["isCode"])] += 1
