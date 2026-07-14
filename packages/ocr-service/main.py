@@ -318,18 +318,20 @@ def _number_variants(img: Image.Image, game: str = "") -> list[Image.Image]:
         _up(ac(0.45, 0.82, 1.0, 1.0), 1500),     # bund-højre bredt
         _up(ac(0.0, 0.82, 1.0, 0.99), 1500),     # fuld-bredde bund-bånd (venstre → højre)
     ]
-    # CODE_GAMES (YGO/DBS/OP): set-koden sidder lige UNDER art-rammen, HØJRE side (~0.60-0.70 y) —
-    # HØJERE end effekt-tekstboksen (0.68-0.80 rammer effekt-teksten, ikke koden). Visuelt verificeret.
-    # Modern foil (Quarter Century): adaptiv threshold skiller den mørke ink fra den lyse prismatiske foil.
+    # CODE_GAMES (YGO/DBS/OP): set-koden sidder i ÉT af to bånd afhængigt af layout — lige under art
+    # (0.60-0.70) ELLER ved effekt-boksens top (0.70-0.80). Lokal bånd-scan (modern+vrains+rarity n=65,
+    # `_ebay/code_band_scan.py`): under-art læste 5, MID-båndet 12 → tidligere single-bånd (0.60-0.70)
+    # missede altså de fleste. CLAHE (contrast-limited hist-eq) + mild sharpen læser den tynde foil-kode
+    # langt renere end den gamle adaptive threshold (som shreddede foil-teksten til støj: MP24-EN047 →
+    # "cMPZ4-EiNO47"). Måling: 5/65 → 18/65 (+13). Fuld-bredde (koden kan sidde venstre el. højre).
     if game in CODE_GAMES:
-        def _code(x0, y0, x1, y1, thresh):
-            c = np.array(img.crop((int(w * x0), int(h * y0), int(w * x1), int(h * y1))).convert("L"))
-            c = cv2.resize(c, None, fx=4, fy=4, interpolation=cv2.INTER_CUBIC)
-            if thresh:
-                c = cv2.adaptiveThreshold(c, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 41, 13)
-            return Image.fromarray(c)
-        variants.append(_code(0.48, 0.61, 0.98, 0.70, False))   # gray-crop på kode-linjen
-        variants.append(_code(0.45, 0.60, 1.0, 0.695, True))    # adaptiv threshold (foil-kort)
+        clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+        sharp = np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]])
+        for y0, y1 in ((0.60, 0.70), (0.70, 0.80)):
+            c = np.array(img.crop((0, int(h * y0), w, int(h * y1))).convert("L"))
+            up = cv2.resize(c, None, fx=4, fy=4, interpolation=cv2.INTER_CUBIC)
+            variants.append(Image.fromarray(clahe.apply(up)))
+            variants.append(Image.fromarray(cv2.filter2D(up, -1, sharp)))
     return variants
 
 
