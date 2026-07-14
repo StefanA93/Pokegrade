@@ -96,7 +96,7 @@ async function _handler(req) {
     return new Response(JSON.stringify({ error: 'Invalid JSON' }), { status: 400 })
   }
 
-  const VALID_GAMES = ['pokemon', 'mtg', 'yugioh', 'onepiece', 'dragonball', 'lorcana', 'riftbound']
+  const VALID_GAMES = ['pokemon', 'mtg', 'yugioh', 'pokemonjp', 'onepiece', 'dragonball', 'lorcana', 'riftbound']
   const game = VALID_GAMES.includes(body.game) ? body.game : 'pokemon'
   const { frontImage, backImage, numberImage, matchedCard } = body
   // matchedCard: pre-identified card from api/match.js (embedding search)
