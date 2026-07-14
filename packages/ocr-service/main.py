@@ -325,10 +325,13 @@ def _number_variants(img: Image.Image, game: str = "") -> list[Image.Image]:
     # langt renere end den gamle adaptive threshold (som shreddede foil-teksten til støj: MP24-EN047 →
     # "cMPZ4-EiNO47"). Måling: 5/65 → 18/65 (+13). Fuld-bredde (koden kan sidde venstre el. højre).
     if game in CODE_GAMES:
+        # x-range HØJRE-forskudt (0.45-1.0): set-koden sidder højre-af-center; fuld-bredde FORTYNDER
+        # den (koden bliver lille i det brede crop → PaddleOCR taber per-tegn-opløsning). Lokal måling
+        # (n=65 svage buckets, `_ebay/xrange_test.py`): fuld-bredde 18/65 → højre 24/65 (+6, samme pass-antal).
         clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
         sharp = np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]])
         for y0, y1 in ((0.60, 0.70), (0.70, 0.80)):
-            c = np.array(img.crop((0, int(h * y0), w, int(h * y1))).convert("L"))
+            c = np.array(img.crop((int(w * 0.45), int(h * y0), w, int(h * y1))).convert("L"))
             up = cv2.resize(c, None, fx=4, fy=4, interpolation=cv2.INTER_CUBIC)
             variants.append(Image.fromarray(clahe.apply(up)))
             variants.append(Image.fromarray(cv2.filter2D(up, -1, sharp)))
