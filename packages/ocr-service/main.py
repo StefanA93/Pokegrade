@@ -220,9 +220,10 @@ def _parse_number(texts: list[str], game: str) -> dict:
         for t in joined:
             m = re.search(r"([A-Z0-9]{2,6})-([A-Z]{0,4})([0-9OISB]{1,4})", t.upper())
             if m:
-                # normalisér OCR-tal-forvirring KUN i hale-nummeret (O→0, I→1, S→5, B→8); prefix+region bevaret
-                tail = m.group(3).translate(str.maketrans("OISB", "0158"))
-                if any(ch.isdigit() for ch in tail):
+                # KRÆV et ÆGTE ciffer i rå-halen (ikke O/I/S/B) → ellers matcher navne som "BLUE-EYES"
+                # (hale "S" → "5") fejlagtigt som kode. Derefter normalisér tal-forvirring i halen.
+                if any(ch.isdigit() for ch in m.group(3)):
+                    tail = m.group(3).translate(str.maketrans("OISB", "0158"))
                     return {"number": f"{m.group(1)}-{m.group(2)}{tail}", "setTotal": None, "isCode": True}
 
     # slash-format NNN/NNN
