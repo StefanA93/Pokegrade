@@ -16,6 +16,21 @@ const CORS_HEADERS = {
 
 const VALID_GAMES = ['pokemon', 'mtg', 'yugioh', 'pokemonjp', 'onepiece', 'dragonball', 'lorcana', 'riftbound']
 
+// Rows-games reprint the same card across many prints (YGO: Blue-Eyes = 50+ set-codes, identical art).
+// Scan can only identify the CARD; the exact PRINT is a Lag-2 user pick (Collectr model). So for these
+// games Lag 2 lists ALL prints of the card by name, not just variant_group_key (exact-print) siblings.
+const PRINT_PICK_GAMES = new Set(['yugioh', 'onepiece', 'dragonball'])
+
+// Base name = card name minus a trailing treatment suffix, e.g. "Blue-Eyes White Dragon (Alternate Art)".
+function baseName(name) {
+  return String(name || '').replace(/\s*\([^)]*\)\s*$/, '').trim()
+}
+
+// Escape a value for a PostgREST ilike pattern embedded in a URL (commas/parens break the query).
+function ilikeSafe(s) {
+  return encodeURIComponent(String(s).replace(/[,()*]/g, ' ').trim())
+}
+
 // finish_types label (tcgplayer/Scryfall vocab) → the card_prices.finish label that holds its price.
 // A holo-rare's price is stored as "Normal" (Cardmarket's single price), so Holofoil/1st Ed/etc → Normal.
 function priceFinishFor(ft) {
@@ -94,15 +109,42 @@ export default async function handler(req) {
     let model = 'single'
     let options = [] // { id, label, finish?, rarity, number, image_url }
 
+    // rows-games: Lag 2 = pick the exact PRINT among ALL prints of the card (name-search), since scan
+    // identifies the card but not the print (same art across reprints).
+    if (PRINT_PICK_GAMES.has(game)) {
+      const base = baseName(card.name)
+      // Prefix-search then filter to EXACT base name in JS: an ilike prefix would wrongly pull distinct
+      // cards ("Dark Magician" must not match "Dark Magician Girl" / "...of Chaos").
+      const fetched = await pg(
+        `card_catalog?game=eq.${encodeURIComponent(game)}&name=ilike.${ilikeSafe(base)}*` +
+          `&select=id,name,number,set_name,rarity,image_url,image_url_small&order=set_name.asc,number.asc&limit=600`
+      )
+      const prints = fetched.filter((p) => baseName(p.name).toLowerCase() === base.toLowerCase())
+      if (prints.length > 1) {
+        model = 'prints'
+        options = prints.map((p) => ({
+          id: p.id,
+          label: p.number || p.set_name || baseName(p.name),
+          treatment: rowsVariantLabel(p),
+          set_name: p.set_name || null,
+          rarity: p.rarity || null,
+          number: p.number || null,
+          image_url: p.image_url || p.image_url_small || null,
+        }))
+      }
+    }
+
     let siblings = []
-    if (card.variant_group_key) {
+    if (!options.length && card.variant_group_key) {
       siblings = await pg(
         `card_catalog?game=eq.${encodeURIComponent(game)}&variant_group_key=eq.${encodeURIComponent(card.variant_group_key)}` +
           `&select=id,name,number,rarity,image_url,image_url_small&order=number.asc,name.asc`
       )
     }
 
-    if (siblings.length > 1) {
+    if (options.length) {
+      // already built (prints model)
+    } else if (siblings.length > 1) {
       model = 'rows'
       options = siblings.map((s) => ({
         id: s.id,

@@ -1286,16 +1286,28 @@ function FreeScanResult({ result, game, frontImg, user, onSave, onSwitchToAI }) 
   const [saved, setSaved] = useState(false)
   const [saveError, setSaveError] = useState('')
 
-  // Lag 2 — unified variant picker (rows + finishes models, with card_prices label bridge)
+  // Lag 2 — unified variant picker. 'prints' (rows-games: pick the exact printing among all prints of
+  // the card), 'finishes' (pokemon/mtg/lorcana), or 'rows' (exact-print treatments). card_prices label bridge.
   const [variants, setVariants] = useState(null)
+  const [model, setModel] = useState(null)
   const [variantIdx, setVariantIdx] = useState(0)
+  const [printQuery, setPrintQuery] = useState('')
   useEffect(() => {
-    if (!selected?.id || !game) { setVariants(null); return }
+    if (!selected?.id || !game) { setVariants(null); setModel(null); return }
     let active = true
-    setVariants(null); setVariantIdx(0)
+    setVariants(null); setModel(null); setVariantIdx(0); setPrintQuery('')
     fetch(`/api/card-variants?game=${encodeURIComponent(game)}&id=${encodeURIComponent(selected.id)}`)
       .then(r => (r.ok ? r.json() : null))
-      .then(d => { if (active && d?.variants?.length) setVariants(d.variants) })
+      .then(d => {
+        if (!active || !d?.variants?.length) return
+        setVariants(d.variants)
+        setModel(d.model || null)
+        // preselect the scan's guessed print so its price shows until the user corrects it
+        if (d.model === 'prints') {
+          const i = d.variants.findIndex(v => v.id === selected.id)
+          if (i >= 0) setVariantIdx(i)
+        }
+      })
       .catch(() => {})
     return () => { active = false }
   }, [selected?.id, game])
@@ -1306,7 +1318,15 @@ function FreeScanResult({ result, game, frontImg, user, onSave, onSwitchToAI }) 
     ? chosen.price
     : { avg7: priceRow.price_avg7 ?? selected?.price_avg7, avg30: priceRow.price_avg30 ?? selected?.price_avg30, low: priceRow.price_low ?? selected?.price_eur_low, sell: priceRow.price_sell, cm_url: priceRow.cm_url }
   const activeId = chosen?.id || selected?.id
-  const activeFinish = chosen?.label || finish
+  // 'prints' model: the chosen printing carries its own number/set/rarity; the label is the set-code
+  // (a print identity, not a finish), so the saved finish is the treatment (or Normal), not the label.
+  const isPrints = model === 'prints'
+  const printTreatment = chosen?.treatment && chosen.treatment !== chosen.number && chosen.treatment !== 'Standard' ? chosen.treatment : null
+  const activeFinish = isPrints ? (printTreatment || 'Normal') : (chosen?.label || finish)
+  const activeNumber = (isPrints && chosen?.number) || selected?.number || null
+  const activeSet = (isPrints && chosen?.set_name) || selected?.set_name || null
+  const activeRarity = (isPrints && chosen?.rarity) || selected?.rarity || null
+  const activeImage = chosen?.image_url || selected?.image_url || null
   const price = activePrice?.avg7 ?? activePrice?.sell ?? activePrice?.low ?? selected?.price_eur ?? null
 
   async function save() {
@@ -1323,12 +1343,12 @@ function FreeScanResult({ result, game, frontImg, user, onSave, onSwitchToAI }) 
       price_low:     activePrice?.low   ?? null,
       price_sell:    activePrice?.sell  ?? null,
       cardmarket_url: activePrice?.cm_url || selected.cardmarket_url || null,
-      image_url:     chosen?.image_url || selected.image_url || null,
-      card_number:   selected.number      || null,
-      set_name:      selected.set_name    || null,
+      image_url:     activeImage,
+      card_number:   activeNumber,
+      set_name:      activeSet,
       catalog_id:    activeId             || null,
     }
-    let { error } = await supabase.from('cards').insert({ ...base, rarity: selected.rarity || null })
+    let { error } = await supabase.from('cards').insert({ ...base, rarity: activeRarity })
     if (error?.code === '42703') {
       const res = await supabase.from('cards').insert(base)
       error = res.error
@@ -1403,19 +1423,67 @@ function FreeScanResult({ result, game, frontImg, user, onSave, onSwitchToAI }) 
           {/* Card header */}
           <div style={{ display: 'flex', gap: 14, padding: 16 }}>
             <img
-              src={selected.image_url || frontImg}
+              src={activeImage || frontImg}
               alt={selected.name}
               style={{ width: 80, height: 110, objectFit: 'contain', borderRadius: 8, background: '#111' }}
             />
             <div style={{ flex: 1 }}>
               <div style={{ fontWeight: 900, fontSize: 17, letterSpacing: -0.3, marginBottom: 2 }}>{selected.name}</div>
-              <div style={{ fontSize: 12, color: COLORS.muted, marginBottom: 8 }}>{selected.set_name} · #{selected.number}</div>
-              {selected.rarity && <Badge color={COLORS.muted} style={{ fontSize: 10 }}>{selected.rarity}</Badge>}
+              <div style={{ fontSize: 12, color: COLORS.muted, marginBottom: 8 }}>{activeSet}{activeNumber ? ` · #${activeNumber}` : ''}</div>
+              {activeRarity && <Badge color={COLORS.muted} style={{ fontSize: 10 }}>{activeRarity}</Badge>}
             </div>
           </div>
 
-          {/* Variant selector (Lag 2) — unified rows + finishes, each with its EU price */}
-          {variants && variants.length > 1 ? (
+          {/* Print picker (Lag 2, rows-games) — scan finds the CARD, user picks the exact printing */}
+          {model === 'prints' && variants && variants.length > 1 ? (
+            <div style={{ padding: '0 16px 12px' }}>
+              <div style={{ fontSize: 11, color: COLORS.muted, marginBottom: 6, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                Printing · {variants.length} available
+              </div>
+              {variants.length > 6 && (
+                <input
+                  value={printQuery}
+                  onChange={e => setPrintQuery(e.target.value)}
+                  placeholder="Search set or code…"
+                  style={{ width: '100%', boxSizing: 'border-box', marginBottom: 8, padding: '8px 10px', borderRadius: 8, fontSize: 12, background: '#0a0a14', border: `1px solid ${COLORS.border}`, color: '#fff' }}
+                />
+              )}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 260, overflowY: 'auto' }}>
+                {variants
+                  .map((v, i) => ({ v, i }))
+                  .filter(({ v }) => {
+                    const q = printQuery.trim().toLowerCase()
+                    if (!q) return true
+                    return `${v.set_name || ''} ${v.number || ''} ${v.treatment || ''}`.toLowerCase().includes(q)
+                  })
+                  .map(({ v, i }) => {
+                    const vp = v.price?.avg7 ?? v.price?.sell ?? v.price?.low
+                    const on = i === variantIdx
+                    const treat = v.treatment && v.treatment !== v.number && v.treatment !== 'Standard' ? v.treatment : null
+                    return (
+                      <button key={`${v.id}|${i}`} onClick={() => setVariantIdx(i)} style={{
+                        display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 8,
+                        cursor: 'pointer', textAlign: 'left', width: '100%',
+                        background: on ? `${COLORS.gold}18` : '#0a0a14',
+                        border: `1.5px solid ${on ? COLORS.gold : COLORS.border}`,
+                      }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 12, fontWeight: 700, color: on ? COLORS.gold : '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            {v.number || v.set_name || '—'}{treat && <span style={{ color: COLORS.muted, fontWeight: 600 }}> · {treat}</span>}
+                          </div>
+                          <div style={{ fontSize: 10, color: COLORS.muted, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            {v.set_name || ''}{v.rarity ? ` · ${v.rarity}` : ''}
+                          </div>
+                        </div>
+                        <span style={{ fontSize: 11, fontWeight: 800, color: vp ? (on ? COLORS.gold : COLORS.muted) : '#444' }}>
+                          {vp ? `${v.price?.currency === 'USD' ? '$' : '€'}${Number(vp).toFixed(2)}` : '—'}
+                        </span>
+                      </button>
+                    )
+                  })}
+              </div>
+            </div>
+          ) : variants && variants.length > 1 ? (
             <div style={{ padding: '0 16px 12px' }}>
               <div style={{ fontSize: 11, color: COLORS.muted, marginBottom: 6, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 }}>Variant</div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
