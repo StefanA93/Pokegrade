@@ -794,14 +794,18 @@ function ScanScreen({ user, profile, onScanDone, modelState, modelProgress }) {
         } catch { return null }
       })()
 
-      // CLIP embedding — beregn client-side hvis model er klar (20s timeout)
-      let embedding = null
+      // CLIP embedding — beregn client-side hvis model er klar (20s timeout). Hele-kort + kunst-region
+      // (kunst løfter YGO markant); begge kun brugt som fallback hvis Railway-embeddingen fejler.
+      let embedding = null, embeddingArt = null
       try {
-        const { isModelLoaded, extractEmbeddingFromDataUrl } = await import('./recognition/EmbeddingExtractor.js')
+        const { isModelLoaded, extractEmbeddingFromDataUrl, extractArtEmbeddingFromDataUrl } = await import('./recognition/EmbeddingExtractor.js')
         if (isModelLoaded()) {
-          embedding = await Promise.race([
-            extractEmbeddingFromDataUrl(resizedImage),
-            new Promise(resolve => setTimeout(() => resolve(null), 20000)),
+          [embedding, embeddingArt] = await Promise.race([
+            Promise.all([
+              extractEmbeddingFromDataUrl(resizedImage),
+              extractArtEmbeddingFromDataUrl(resizedImage).catch(() => null),
+            ]),
+            new Promise(resolve => setTimeout(() => resolve([null, null]), 20000)),
           ])
         }
       } catch { /* phash alene */ }
@@ -813,7 +817,7 @@ function ScanScreen({ user, profile, onScanDone, modelState, modelProgress }) {
         res = await fetch('/api/scan-free', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ image: resizedImage, game, embedding, clientPhash }),
+          body: JSON.stringify({ image: resizedImage, game, embedding, embeddingArt, clientPhash }),
           signal: controller.signal,
         })
       } catch (e) {

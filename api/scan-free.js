@@ -445,7 +445,7 @@ export default async function handler(req, res) {
     })
   } catch { return res.status(400).json({ error: 'Invalid JSON' }) }
 
-  const { image, game, embedding: clientEmbedding, clientPhash: incomingPhash } = body
+  const { image, game, embedding: clientEmbedding, embeddingArt: clientArtEmbedding, clientPhash: incomingPhash } = body
   if (!image) return res.status(400).json({ error: 'image required (base64 dataURL)' })
 
   const safeGame = VALID_GAMES.includes(game) ? game : 'pokemon'
@@ -513,9 +513,11 @@ export default async function handler(req, res) {
     ? clientEmbedding : null
   const activeEmbedding = railwayEmbedding ?? clientFallback
 
-  // Kunst-region kombination bruges når scannen kom fra Railway (har art) — løfter kort-ID markant på
-  // tekst-dominerede kort (YGO). RPC falder tilbage til hele-kort hvor katalog-arten mangler → sikkert for alle spil.
-  const activeEmbeddingArt = railwayEmbedding ? railwayEmbeddingArt : null
+  // Kunst-region kombination løfter kort-ID markant på tekst-dominerede kort (YGO). Foretræk Railways art;
+  // fald tilbage til klientens art (kun når vi også bruger klientens hele-kort-embedding, så de flugter).
+  // RPC falder tilbage til hele-kort hvor katalog-arten mangler → sikkert for alle spil.
+  const clientArtFallback = (clientArtEmbedding && Array.isArray(clientArtEmbedding) && clientArtEmbedding.length === 512) ? clientArtEmbedding : null
+  const activeEmbeddingArt = railwayEmbedding ? railwayEmbeddingArt : (activeEmbedding === clientFallback ? clientArtFallback : null)
   let clipAll = null
   if (activeEmbedding) {
     const _t0Clip = Date.now()

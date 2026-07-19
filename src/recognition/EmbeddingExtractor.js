@@ -46,3 +46,23 @@ export async function extractEmbeddingFromDataUrl(dataUrl) {
   const output = await model(dataUrl, { pooling: 'mean', normalize: true })
   return Array.from(output.data)
 }
+
+// Kunst-region embedding (client-side fallback). Crop til kunst-vinduet FØR CLIP — SAMME vindue som
+// katalog (scripts/backfill-yugioh-art.mjs) + scan-servicen (embedding-server.js) så cosine flugter.
+// YGO-kort er tekst-dominerede → kunst-region tredobler kort-ID. Bruges kun når Railway-arten mangler.
+export async function extractArtEmbeddingFromDataUrl(dataUrl) {
+  const model = await loadEmbeddingModel()
+  const img = await new Promise((resolve, reject) => {
+    const i = new Image()
+    i.onload = () => resolve(i)
+    i.onerror = reject
+    i.src = dataUrl
+  })
+  const w = img.naturalWidth || img.width, h = img.naturalHeight || img.height
+  const cw = Math.max(1, Math.round(w * 0.84)), ch = Math.max(1, Math.round(h * 0.35))
+  const c = document.createElement('canvas')
+  c.width = cw; c.height = ch
+  c.getContext('2d').drawImage(img, Math.round(w * 0.08), Math.round(h * 0.155), cw, ch, 0, 0, cw, ch)
+  const output = await model(c.toDataURL('image/jpeg', 0.92), { pooling: 'mean', normalize: true })
+  return Array.from(output.data)
+}
