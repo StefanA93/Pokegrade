@@ -44,8 +44,8 @@ jobs:
       - name: MTG — Scryfall (Cardmarket EUR)
         run: node scripts/backfill-mtg-prices.js
 
-      - name: YuGiOh — YGOProDeck (Cardmarket EUR)
-        run: node scripts/backfill-yugioh-prices.js
+      - name: YuGiOh — per-print (TCGPlayer USD + CM EUR fallback)
+        run: node scripts/backfill-yugioh-print-prices.mjs
 
       # ── Ikke-CM priser (kun accepteret for disse to spil) ─────────────
       - name: Dragon Ball — tcgapi.dev (TCGPlayer USD)
