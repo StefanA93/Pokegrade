@@ -72,7 +72,8 @@ async function getServerEmbedding(base64Image, game) {
     if (!r.ok) throw new Error(`Railway ${r.status}`)
     const data = await r.json()
     if (!Array.isArray(data.embedding) || data.embedding.length !== 512) throw new Error('bad embedding shape')
-    return { embedding: data.embedding, ocr: data.ocr ?? null }
+    const art = Array.isArray(data.embedding_art) && data.embedding_art.length === 512 ? data.embedding_art : null
+    return { embedding: data.embedding, embedding_art: art, ocr: data.ocr ?? null }
   }
   try {
     return await attempt()
@@ -317,6 +318,19 @@ async function clipSearch(embedding, game, count) {
   return r.json()
 }
 
+// Kombineret hele-kort + kunst-region retrieval (0.5/0.5). RPC'en falder tilbage til hele-kort pr. række
+// hvor embedding_art er NULL, så det er sikkert for alle spil (kun YGO har kunst-embeddings pt.).
+async function clipSearchCombined(embedding, embeddingArt, game, count) {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/match_cards_combined`, {
+    method:  'POST',
+    headers: sbh(),
+    body:    JSON.stringify({ query_embedding: `[${embedding.join(',')}]`, query_art: `[${embeddingArt.join(',')}]`, game_filter: game, match_count: count }),
+    signal:  AbortSignal.timeout(8000),
+  })
+  if (!r.ok) return null
+  return r.json()
+}
+
 async function phashSearch(game, uploadedHash) {
   const all = []
   let offset = 0
@@ -486,6 +500,7 @@ export default async function handler(req, res) {
   scanDiag.railwayOk = !!railway?.embedding
   scanDiag.ocrSvc    = ocrService ? 'ok' : (OCR_SERVICE_URL ? 'fail' : 'unset')
   const railwayEmbedding = railway?.embedding ?? null
+  const railwayEmbeddingArt = railway?.embedding_art ?? null
   // OCR: foretræk PaddleOCR-servicen (læser nummer OG navn); fald tilbage til Railways Tesseract.
   const ocrResult = ocrService ?? railway?.ocr ?? null
   const ocrName   = ocrService?.name ?? null
@@ -498,11 +513,17 @@ export default async function handler(req, res) {
     ? clientEmbedding : null
   const activeEmbedding = railwayEmbedding ?? clientFallback
 
+  // Kunst-region kombination bruges når scannen kom fra Railway (har art) — løfter kort-ID markant på
+  // tekst-dominerede kort (YGO). RPC falder tilbage til hele-kort hvor katalog-arten mangler → sikkert for alle spil.
+  const activeEmbeddingArt = railwayEmbedding ? railwayEmbeddingArt : null
   let clipAll = null
   if (activeEmbedding) {
     const _t0Clip = Date.now()
-    const _clipRaw = await clipSearch(activeEmbedding, safeGame, matchCount).catch(e => { scanDiag.clipErr = e.message; return null })
+    const _clipRaw = activeEmbeddingArt
+      ? await clipSearchCombined(activeEmbedding, activeEmbeddingArt, safeGame, matchCount).catch(e => { scanDiag.clipErr = e.message; return null })
+      : await clipSearch(activeEmbedding, safeGame, matchCount).catch(e => { scanDiag.clipErr = e.message; return null })
     scanDiag.clipMs = Date.now() - _t0Clip
+    scanDiag.clipCombined = !!activeEmbeddingArt
     scanDiag.clipStatus = Array.isArray(_clipRaw) ? _clipRaw.length : (_clipRaw === null ? 'null' : 'other')
     clipAll = _clipRaw
   }

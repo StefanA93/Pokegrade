@@ -11,7 +11,7 @@
  */
 
 import http from 'http'
-import { extractEmbedding } from './embedding-server.js'
+import { extractEmbedding, extractArtEmbedding } from './embedding-server.js'
 import { ocrCardNumber, getOcrWorker } from './card-ocr.js'
 
 const PORT   = process.env.PORT   || 3001
@@ -78,12 +78,13 @@ const server = http.createServer(async (req, res) => {
     const base64 = image.replace(/^data:image\/\w+;base64,/, '')
     const buffer = Buffer.from(base64, 'base64')
 
-    // Embedding + OCR i parallel — begge fra samme billede, begge varme
-    const [embedding, ocr] = await Promise.all([
+    // Hele-kort-embedding + kunst-region-embedding + OCR i parallel — alle fra samme billede
+    const [embedding, embeddingArt, ocr] = await Promise.all([
       extractEmbedding(buffer),
+      extractArtEmbedding(buffer).catch(() => null),
       ocrCardNumber(buffer, body.game || 'pokemon').catch(() => null),
     ])
-    return json(res, 200, { embedding, ocr })
+    return json(res, 200, { embedding, embedding_art: embeddingArt, ocr })
   } catch (err) {
     console.error('Embed error:', err.message)
     return json(res, 500, { error: 'Embedding failed' })
