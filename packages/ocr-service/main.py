@@ -295,7 +295,8 @@ def ocr(req: OcrReq, authorization: str = Header(default="")):
     num = _read_number(img, game, texts)
 
     name = _guess_name_ja(texts) if game == "pokemonjp" else _guess_name(texts)
-    return {**num, "name": name, "texts": texts}
+    passcodes = _read_passcode(img, game)
+    return {**num, "name": name, "texts": texts, "passcodes": passcodes}
 
 
 def _up(g: Image.Image, width: int) -> Image.Image:
@@ -357,3 +358,24 @@ def _read_number(img: Image.Image, game: str, full_texts: list[str]) -> dict:
 
     (num, total, is_code), _ = max(votes.items(), key=rank)
     return {"number": num, "setTotal": total, "isCode": is_code}
+
+
+# YGO-passcode (8-cifret, unik pr. kort, bund-VENSTRE) — YGO's svar på Pokemons collector-nummer:
+# et rent tal, foil-uafhængigt, fast position, findes i kataloget (= YGOProDeck-billed-id). Slår kortet
+# op direkte (image_url LIKE), uafhængigt af den foil-degraderede kunst. Multi-position (kortet fylder
+# ikke altid rammen) + otsu/adaptiv threshold (dæmper foil-border). x 0.02-0.45 undgår ATK/DEF til højre.
+def _read_passcode(img: Image.Image, game: str) -> list[str]:
+    if game not in CODE_GAMES:
+        return []
+    w, h = img.size
+    votes = Counter()
+    for y0 in (0.86, 0.89, 0.92, 0.95):
+        y1 = min(1.0, y0 + 0.05)
+        c = np.array(img.crop((int(w * 0.02), int(h * y0), int(w * 0.45), int(h * y1))).convert("L"))
+        up = cv2.resize(c, None, fx=4, fy=4, interpolation=cv2.INTER_CUBIC)
+        preps = [up, cv2.threshold(up, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]]
+        for p in preps:
+            for t in _run(Image.fromarray(p), game):
+                for m in re.findall(r"\d{7,8}", t.replace(" ", "")):
+                    votes[m] += 1
+    return [c for c, _ in votes.most_common(3)]
