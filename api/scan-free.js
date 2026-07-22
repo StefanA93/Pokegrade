@@ -232,6 +232,19 @@ async function codeSearch(game, code) {
   return (await r.json()).filter(c => codeKeyN(c.number) === want)
 }
 
+// Passcode-opslag (YGO): den 8-cifrede passcode (= YGOProDeck billed-id i image_url) er UNIK pr. kort og
+// foil-uafhængig. Slår alle tryk af kortet op via image_url LIKE — YGO's svar på Pokemons collector-nummer.
+async function passcodeSearch(game, passcodes) {
+  const pcs = [...new Set((passcodes || []).filter(p => /^\d{7,8}$/.test(p)))]
+  if (!pcs.length) return []
+  const orFilter = pcs.map(p => `image_url.like.*/cards/${p}.*`).join(',')
+  const r = await fetch(
+    `${SUPABASE_URL}/rest/v1/card_catalog?game=eq.${game}&or=(${orFilter})&number=not.like.product-*&select=id,name,number,phash&limit=300`,
+    { headers: sbh() })
+  if (!r.ok) return []
+  return r.json()
+}
+
 // Cosine-similarity i JS (samme mål som match_cards' 1-(embedding<=>query)) — til CLIP-ranking
 // af navn-injicerede kort der ligger UDEN FOR CLIP-poolen (top-30).
 function cosineSim(a, b) {
@@ -638,6 +651,29 @@ export default async function handler(req, res) {
     scanDiag.codeHits = codeHits.length
   }
 
+  // Passcode-injektion (YGO): den læste 8-cifrede passcode er en UNIK, foil-uafhængig identifikator
+  // (som Pokemons nummer). Slår KORTET direkte op via image_url → injicér alle tryk + giv dem den
+  // STÆRKESTE bonus (+1.0 i scoring), så de vinder trods foil-degraderet CLIP. Læser af den fejl-
+  // udsatte kunst bliver dermed omgået når passcode'en kan læses.
+  let passcodeIds = new Set()
+  const ocrPasscodes = ocrResult?.passcodes ?? []
+  if (ocrPasscodes.length) {
+    const existing = new Set(candidatePool.map(c => c.id))
+    const pcHits = await passcodeSearch(safeGame, ocrPasscodes).catch(() => [])
+    passcodeIds = new Set(pcHits.map(h => h.id))
+    const inject = pcHits.filter(h => !existing.has(h.id))
+    const embMap = activeEmbedding ? await fetchEmbeddings(inject.map(h => h.id)).catch(() => ({})) : {}
+    for (const hch of inject) {
+      const emb = embMap[hch.id]
+      candidatePool.push({
+        id: hch.id, name: hch.name ?? null, number: hch.number ?? null, phash: hch.phash ?? null,
+        clipSim: emb ? cosineSim(activeEmbedding, emb) : 0,
+        phashDist: (uploadedPhash && hch.phash) ? hammingDist(uploadedPhash, hch.phash) : null,
+      })
+    }
+    scanDiag.passcodeHits = pcHits.length
+  }
+
   if (!candidatePool.length) {
     return res.status(200).json({
       candidates: [], confidence: 'low', best: null,
@@ -664,9 +700,10 @@ export default async function handler(req, res) {
     const name   = safeGame === 'pokemonjp'
       ? nameBonusJa(c.nameJaNorm, ocrJaTokens)
       : nameBonus(c.name, ocrName)   // navn+nummer der begge matcher = krydsvalideret → ~1.0
+    const passcode = passcodeIds.has(c.id) ? 1.0 : 0   // UNIK foil-uafhængig identifikator → dominerer
     const total  = usedClip
-      ? clip * w.clip + ph * w.phash + number + name
-      : ph * 0.75 + number + name
+      ? clip * w.clip + ph * w.phash + number + name + passcode
+      : ph * 0.75 + number + name + passcode
     return { id: c.id, total, clipSim: clip, phashSim: ph }
   }).sort((a, b) => b.total - a.total).slice(0, 5)
 
