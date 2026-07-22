@@ -369,11 +369,14 @@ def _read_passcode(img: Image.Image, game: str) -> list[str]:
         return []
     w, h = img.size
     votes = Counter()
-    for y0 in (0.86, 0.89, 0.92, 0.95):
+    for y0 in (0.84, 0.87, 0.90, 0.93, 0.96):
         y1 = min(1.0, y0 + 0.05)
         c = np.array(img.crop((int(w * 0.02), int(h * y0), int(w * 0.45), int(h * y1))).convert("L"))
         up = cv2.resize(c, None, fx=4, fy=4, interpolation=cv2.INTER_CUBIC)
-        preps = [up, cv2.threshold(up, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]]
+        preps = [
+            up,  # plain grayscale (læser de fleste)
+            cv2.adaptiveThreshold(up, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 31, 10),  # foil-border
+        ]
         for p in preps:
             for t in _run(Image.fromarray(p), game):
                 for m in re.findall(r"\d{7,8}", t.replace(" ", "")):
