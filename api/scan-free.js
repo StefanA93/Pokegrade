@@ -235,7 +235,9 @@ async function codeSearch(game, code) {
 // Passcode-opslag (YGO): den 8-cifrede passcode (= YGOProDeck billed-id i image_url) er UNIK pr. kort og
 // foil-uafhængig. Slår alle tryk af kortet op via image_url LIKE — YGO's svar på Pokemons collector-nummer.
 async function passcodeSearch(game, passcodes) {
-  const pcs = [...new Set((passcodes || []).filter(p => /^\d{7,8}$/.test(p)))]
+  // image_url stripper foranstillede nuller (YGOProDeck: "03611830" på kortet → /cards/3611830.jpg),
+  // men OCR læser de fulde 8 cifre → strip nuller så opslaget matcher (rammer ALLE passcodes < 10M).
+  const pcs = [...new Set((passcodes || []).filter(p => /^\d{7,8}$/.test(p)).map(p => p.replace(/^0+/, '')))].filter(p => p.length >= 6)
   if (!pcs.length) return []
   const orFilter = pcs.map(p => `image_url.like.*/cards/${p}.*`).join(',')
   const r = await fetch(
