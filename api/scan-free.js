@@ -211,6 +211,14 @@ function codeKeyN(s) {
   const m = codeCanon(s).match(/^([A-Z0-9]+)-[A-Z]*?(\d+)$/)
   return m ? `${m[1]}|${parseInt(m[2], 10)}` : null
 }
+// Fallback-nøgle når OCR har tilføjet ét spuriøst bagciffer (systematisk "5" på OP/DBS folie-kort:
+// OP04-044→OP04-0445, BT20-121→BT20-1215). Dropper sidste ciffer. Bruges KUN når eksakt kode ikke
+// resolverede + katalog-valideret → korrekte koder trigger den aldrig, og kun ægte kort injiceres.
+function codeKeyTrimLast(s) {
+  const m = codeCanon(s).match(/^([A-Z0-9]+)-[A-Z]*?(\d+)$/)
+  if (!m || m[2].length < 2) return null
+  return `${m[1]}|${parseInt(m[2].slice(0, -1), 10)}`
+}
 
 // Kode-injektion (CODE_GAMES: yugioh/dbs/onepiece). Set-koden identificerer BÅDE kortet OG trykket
 // unikt → henter de(t) kort ind hvis kode matcher OCR'ens (region-agnostisk: LOB-EN005 ~ LOB-005).
@@ -229,7 +237,14 @@ async function codeSearch(game, code) {
     `${SUPABASE_URL}/rest/v1/card_catalog?game=eq.${game}&or=(${orFilter})&number=not.like.product-*&select=id,name,number,phash&limit=300`,
     { headers: sbh() })
   if (!r.ok) return []
-  return (await r.json()).filter(c => codeKeyN(c.number) === want)
+  const rows = await r.json()
+  let hits = rows.filter(c => codeKeyN(c.number) === want)
+  if (!hits.length) {
+    // eksakt kode resolverede ikke → prøv med sidste ciffer droppet (spuriøst OCR-bagciffer)
+    const trim = codeKeyTrimLast(code)
+    if (trim) hits = rows.filter(c => codeKeyN(c.number) === trim)
+  }
+  return hits
 }
 
 // Passcode-opslag (YGO): den 8-cifrede passcode (= YGOProDeck billed-id i image_url) er UNIK pr. kort og
