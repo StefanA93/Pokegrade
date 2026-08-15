@@ -81,7 +81,7 @@ const server = http.createServer(async (req, res) => {
     // Hele-kort-embedding + kunst-region-embedding + OCR i parallel — alle fra samme billede
     const [embedding, embeddingArt, ocr] = await Promise.all([
       extractEmbedding(buffer),
-      extractArtEmbedding(buffer).catch(() => null),
+      extractArtEmbedding(buffer, body.game).catch(() => null),
       ocrCardNumber(buffer, body.game || 'pokemon').catch(() => null),
     ])
     return json(res, 200, { embedding, embedding_art: embeddingArt, ocr })

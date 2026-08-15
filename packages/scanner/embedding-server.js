@@ -38,19 +38,27 @@ export async function extractEmbedding(imageBuffer) {
   return Array.from(output.data)
 }
 
-// Kunst-region embedding: YGO-kort er tekst-dominerede → hele-kort-embedding er svag; illustrationen
-// er den diskriminative del. Crop til kunst-vinduet (standard monster-layout) FØR CLIP. SAMME crop som
-// katalog-beregningen (_ebay/art_reembed.mjs) så scan- og katalog-kunst-embeddings flugter. Kombineres
-// 0.5/0.5 med hele-kort i match_cards_combined (fast monster-vindue er forkert for trap/link → derfor kombinér).
-export async function extractArtEmbedding(imageBuffer) {
+// Kunst-region embedding: tekst/vandmærke-tunge kort har svag hele-kort-embedding; illustrationen er den
+// diskriminative del. Crop til kunst-vinduet FØR CLIP. Vinduet er SPIL-BEVIDST — layouts varierer:
+//  - YGO (default): monster-kunst-vindue (tekst-domineret kort, lille kunst).
+//  - One Piece: øvre karakter-region (0.06-0.40) der UNDGÅR "SAMPLE"-vandmærket på Bandais katalogbilleder
+//    (validering: hele-kort→øvre-crop løftede OP retrieval top-1 30%→49%, top-5 49%→65%).
+// SAMME crop bruges ved katalog-backfill OG scan-tid (begge via denne funktion) så embeddings flugter.
+// Kombineres 0.5/0.5 med hele-kort i match_cards_combined.
+const ART_WINDOWS = {
+  onepiece: { l: 0.05, t: 0.06, w: 0.90, h: 0.34 },
+  default:  { l: 0.08, t: 0.155, w: 0.84, h: 0.35 },
+}
+export async function extractArtEmbedding(imageBuffer, game) {
   const model = await getModel()
   const meta = await sharp(imageBuffer).metadata()
   const w = meta.width || 1, h = meta.height || 1
+  const win = ART_WINDOWS[game] || ART_WINDOWS.default
   const region = {
-    left:   Math.round(w * 0.08),
-    top:    Math.round(h * 0.155),
-    width:  Math.max(1, Math.round(w * 0.84)),
-    height: Math.max(1, Math.round(h * 0.35)),
+    left:   Math.round(w * win.l),
+    top:    Math.round(h * win.t),
+    width:  Math.max(1, Math.round(w * win.w)),
+    height: Math.max(1, Math.round(h * win.h)),
   }
   const { data, info } = await sharp(imageBuffer).extract(region).removeAlpha().raw().toBuffer({ resolveWithObject: true })
   const image  = new RawImage(new Uint8ClampedArray(data), info.width, info.height, 3)

@@ -14,3 +14,14 @@ dist
 *.sql
 *.toml
 num_zone_debug.png
+_ebay
+*.log
+_scryfall
+_ocrlab
+_ocrdebug
+_bench
+_socket
+.cache
+meilisearch_data
+meili_data
+.vercel

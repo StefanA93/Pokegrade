@@ -333,8 +333,8 @@ async function clipSearch(embedding, game, count) {
   return r.json()
 }
 
-// Kombineret hele-kort + kunst-region retrieval (0.5/0.5). RPC'en falder tilbage til hele-kort pr. række
-// hvor embedding_art er NULL, så det er sikkert for alle spil (kun YGO har kunst-embeddings pt.).
+// Kombineret hele-kort + kunst-region retrieval (0.5/0.5). NB: RPC'en returnerer KUN rækker MED
+// embedding_combined (pt. kun YGO) — for andre spil giver den tomt, og kalderen falder tilbage til clipSearch.
 async function clipSearchCombined(embedding, embeddingArt, game, count) {
   const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/match_cards_combined`, {
     method:  'POST',
@@ -536,11 +536,17 @@ export default async function handler(req, res) {
   let clipAll = null
   if (activeEmbedding) {
     const _t0Clip = Date.now()
-    const _clipRaw = activeEmbeddingArt
+    let _clipRaw = activeEmbeddingArt
       ? await clipSearchCombined(activeEmbedding, activeEmbeddingArt, safeGame, matchCount).catch(e => { scanDiag.clipErr = e.message; return null })
       : await clipSearch(activeEmbedding, safeGame, matchCount).catch(e => { scanDiag.clipErr = e.message; return null })
+    // match_cards_combined dækker KUN rækker med embedding_combined (pt. kun YGO). For spil uden combined-
+    // dækning giver den tomt → fald tilbage til hele-kort match_cards, ellers får de intet CLIP-net.
+    if (activeEmbeddingArt && (!Array.isArray(_clipRaw) || _clipRaw.length === 0)) {
+      _clipRaw = await clipSearch(activeEmbedding, safeGame, matchCount).catch(e => { scanDiag.clipErr2 = e.message; return null })
+      scanDiag.clipFallback = true
+    }
     scanDiag.clipMs = Date.now() - _t0Clip
-    scanDiag.clipCombined = !!activeEmbeddingArt
+    scanDiag.clipCombined = !!activeEmbeddingArt && !scanDiag.clipFallback
     scanDiag.clipStatus = Array.isArray(_clipRaw) ? _clipRaw.length : (_clipRaw === null ? 'null' : 'other')
     clipAll = _clipRaw
   }
