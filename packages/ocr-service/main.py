@@ -184,23 +184,19 @@ def _card_crop(pil: Image.Image) -> Image.Image:
     if frac > 0.88:                       # fylder rammen (ingen baggrund) -> autocrop-fallback
         return pil
     peri = cv2.arcLength(c, True); approx = cv2.approxPolyDP(c, 0.02 * peri, True)
-    if len(approx) == 4:                  # ren firkant -> perspektiv-warp (bedst; retter tilt)
-        tl, tr, br, bl = _order_pts(approx)
-        tw = int(max(np.linalg.norm(br - bl), np.linalg.norm(tr - tl)))
-        th = int(max(np.linalg.norm(tr - br), np.linalg.norm(tl - bl)))
-        if tw >= 0.3 * w and th >= 0.3 * h and (0.66 < tw / max(1, th) < 0.95):
-            if _skew(tl, tr, br, bl) < 0.8 and frac > 0.80:  # akse-justeret + fylder rammen -> warp = kun slør
-                return pil
-            M = cv2.getPerspectiveTransform(
-                np.array([tl, tr, br, bl], dtype="float32"),
-                np.array([[0, 0], [tw, 0], [tw, th], [0, th]], dtype="float32"))
-            return Image.fromarray(cv2.cvtColor(cv2.warpPerspective(img, M, (tw, th)), cv2.COLOR_BGR2RGB))
-    # Ingen ren firkant (folie-kort på lys baggrund giver tit takket kontur → approx≠4). En akse-justeret
-    # bounding-box fjerner stadig bordet/baggrunden, så de relative kode/kunst-crops rammer kortet.
-    x, y, bw, bh = cv2.boundingRect(c)
-    if bw >= 0.3 * w and bh >= 0.3 * h and (0.60 < bw / max(1, bh) < 1.0):
-        return pil.crop((x, y, x + bw, y + bh))
-    return pil
+    if len(approx) != 4:                  # intet rent firkant -> no-op
+        return pil
+    tl, tr, br, bl = _order_pts(approx)
+    tw = int(max(np.linalg.norm(br - bl), np.linalg.norm(tr - tl)))
+    th = int(max(np.linalg.norm(tr - br), np.linalg.norm(tl - bl)))
+    if tw < 0.3 * w or th < 0.3 * h or not (0.66 < tw / max(1, th) < 0.95):  # urealistisk/for smal -> no-op
+        return pil
+    if _skew(tl, tr, br, bl) < 0.8 and frac > 0.80:  # akse-justeret + fylder rammen -> warp giver kun resample-slør
+        return pil
+    M = cv2.getPerspectiveTransform(
+        np.array([tl, tr, br, bl], dtype="float32"),
+        np.array([[0, 0], [tw, 0], [tw, th], [0, th]], dtype="float32"))
+    return Image.fromarray(cv2.cvtColor(cv2.warpPerspective(img, M, (tw, th)), cv2.COLOR_BGR2RGB))
 
 
 def _preprocess(img: Image.Image) -> Image.Image:
@@ -330,17 +326,13 @@ def _number_variants(img: Image.Image, game: str = "") -> list[Image.Image]:
     # langt renere end den gamle adaptive threshold (som shreddede foil-teksten til støj: MP24-EN047 →
     # "cMPZ4-EiNO47"). Måling: 5/65 → 18/65 (+13). Fuld-bredde (koden kan sidde venstre el. højre).
     if game in CODE_GAMES:
-        # Set-kode-position er SPIL-BEVIDST — den sidder forskellige steder:
-        #  - YGO: midt-kortet (lige under art 0.60-0.70 ELLER effekt-boks-top 0.70-0.80), højre-af-center.
-        #  - One Piece / Dragon Ball: BUND-HØJRE hjørne (y~0.90-0.99, x~0.55-1.0), ved rarity/cost.
-        #    (YGO's midt-bånd rammer helt forbi OP/DBS-koden → derfor blev de kun læst via de generiske
-        #    bund-bånd, uden CLAHE → folie-tekst shreddede. Verificeret bund-højre-position visuelt.)
+        # x-range HØJRE-forskudt (0.45-1.0): set-koden sidder højre-af-center; fuld-bredde FORTYNDER
+        # den (koden bliver lille i det brede crop → PaddleOCR taber per-tegn-opløsning). Lokal måling
+        # (n=65 svage buckets, `_ebay/xrange_test.py`): fuld-bredde 18/65 → højre 24/65 (+6, samme pass-antal).
         clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
         sharp = np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]])
-        bands = ((0.90, 0.97), (0.92, 0.995)) if game in ("onepiece", "dragonball") else ((0.60, 0.70), (0.70, 0.80))
-        x0 = 0.55 if game in ("onepiece", "dragonball") else 0.45
-        for y0, y1 in bands:
-            c = np.array(img.crop((int(w * x0), int(h * y0), w, int(h * y1))).convert("L"))
+        for y0, y1 in ((0.60, 0.70), (0.70, 0.80)):
+            c = np.array(img.crop((int(w * 0.45), int(h * y0), w, int(h * y1))).convert("L"))
             up = cv2.resize(c, None, fx=4, fy=4, interpolation=cv2.INTER_CUBIC)
             variants.append(Image.fromarray(clahe.apply(up)))
             variants.append(Image.fromarray(cv2.filter2D(up, -1, sharp)))
