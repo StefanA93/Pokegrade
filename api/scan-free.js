@@ -216,7 +216,9 @@ function codeKeyN(s) {
 // resolverede + katalog-valideret → korrekte koder trigger den aldrig, og kun ægte kort injiceres.
 function codeKeyTrimLast(s) {
   const m = codeCanon(s).match(/^([A-Z0-9]+)-[A-Z]*?(\d+)$/)
-  if (!m || m[2].length < 2) return null
+  // KUN når cifer-delen er ≥4: OP/DBS-set-koder har max 3 cifre, så et 4-cifret read er ALTID et
+  // spuriøst ekstra ciffer → nul false-positives på korrekt-læste koder (som aldrig når 4 cifre).
+  if (!m || m[2].length < 4) return null
   return `${m[1]}|${parseInt(m[2].slice(0, -1), 10)}`
 }
 
@@ -410,8 +412,11 @@ function numberBonus(candNumber, ocr) {
   if (ocr.isCode) {
     // Region-agnostisk: OCR læser tit regionen forkert/mangelfuldt ("PSV-O11"/"BLAR-ENO54" vs
     // katalogets "PSV-EN011"/"BLAR-EN054") → sammenlign KUN set-prefix + trailing-nummer.
-    const a = codeKeyN(cand.raw), b = codeKeyN(ocr.number)
-    return a && b && a === b ? 0.55 : 0
+    const a = codeKeyN(cand.raw)
+    if (!a) return 0
+    if (a === codeKeyN(ocr.number)) return 0.55
+    // spuriøst-bagciffer-recovery (samme regel som codeSearch): så trim-injicerede kort får bonussen
+    return a === codeKeyTrimLast(ocr.number) ? 0.55 : 0
   }
   if (cand.num == null || cand.num !== String(ocr.number)) return 0
   if (ocr.setTotal && cand.total) return cand.total === ocr.setTotal ? 0.55 : 0.12  // total skelner base vs base2
