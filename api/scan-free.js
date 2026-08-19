@@ -221,32 +221,40 @@ function codeKeyTrimLast(s) {
   if (!m || m[2].length < 4) return null
   return `${m[1]}|${parseInt(m[2].slice(0, -1), 10)}`
 }
+// Plausible codeKeyN-værdier for en OCR-læst kode (eksakt + almindelige OCR-fejl). Brugt af BÅDE
+// codeSearch (injektion) OG numberBonus (scoring) → konsistent. Alle er katalog-validerede downstream.
+function codeVariantKeys(code, game) {
+  const keys = new Set()
+  const exact = codeKeyN(code); if (exact) keys.add(exact)
+  const trim = codeKeyTrimLast(code); if (trim) keys.add(trim)
+  // OP: OCR taber tit førstebogstavet "O" i "OP##" → læser "P##". Ægte OP-promos er "P-###" (P alene,
+  // ikke P+2cifre), så "P\d\d-" er entydigt et tabt-O → gendan "0P##" (kanonisk O=0). Kun onepiece.
+  if (game === 'onepiece') {
+    const m = codeCanon(code).match(/^P(\d{2})-[A-Z]*?(\d+)$/)
+    if (m) keys.add(`0P${m[1]}|${parseInt(m[2], 10)}`)
+  }
+  return keys
+}
 
 // Kode-injektion (CODE_GAMES: yugioh/dbs/onepiece). Set-koden identificerer BÅDE kortet OG trykket
 // unikt → henter de(t) kort ind hvis kode matcher OCR'ens (region-agnostisk: LOB-EN005 ~ LOB-005).
 // Løser modern-kollaps (CLIP forkert kort) + same-art print-miss: en bonus kan ikke booste et kort
 // der ikke er i puljen, men CLIP-navnepuljen misser tit det rigtige tryk/kort på foil-tunge YGO-kort.
 async function codeSearch(game, code) {
-  const want = codeKeyN(code)
-  if (!want) return []
+  const want = codeVariantKeys(code, game)   // eksakt + trim + OP tabt-førstegn
+  if (!want.size) return []
   const raw = String(code).toUpperCase().match(/^([A-Z0-9]+)-/)
   const can = codeCanon(code).match(/^([A-Z0-9]+)-/)
   // søg BÅDE rå OG kanonisk prefix (digit-prefix RAOI vs RA01, bogstav-prefix IOC) → filtrér på kanonisk nøgle
-  const prefixes = [...new Set([raw && raw[1], can && can[1]].filter(Boolean))]
-  if (!prefixes.length) return []
-  const orFilter = prefixes.map(p => `number.like.${p}-*`).join(',')
+  const prefixes = new Set([raw && raw[1], can && can[1]].filter(Boolean))
+  if (game === 'onepiece') { const m = String(code).toUpperCase().match(/^P(\d{2})-/); if (m) prefixes.add('OP' + m[1]) }
+  if (!prefixes.size) return []
+  const orFilter = [...prefixes].map(p => `number.like.${p}-*`).join(',')
   const r = await fetch(
     `${SUPABASE_URL}/rest/v1/card_catalog?game=eq.${game}&or=(${orFilter})&number=not.like.product-*&select=id,name,number,phash&limit=300`,
     { headers: sbh() })
   if (!r.ok) return []
-  const rows = await r.json()
-  let hits = rows.filter(c => codeKeyN(c.number) === want)
-  if (!hits.length) {
-    // eksakt kode resolverede ikke → prøv med sidste ciffer droppet (spuriøst OCR-bagciffer)
-    const trim = codeKeyTrimLast(code)
-    if (trim) hits = rows.filter(c => codeKeyN(c.number) === trim)
-  }
-  return hits
+  return (await r.json()).filter(c => want.has(codeKeyN(c.number)))
 }
 
 // Passcode-opslag (YGO): den 8-cifrede passcode (= YGOProDeck billed-id i image_url) er UNIK pr. kort og
@@ -406,17 +414,15 @@ function parseCardNum(s) {
 // OCR forfiner CLIP: boost en kandidat hvis dens EGET nummer matcher OCR. Kandidatens
 // number-felt ("004/102") indeholder både nummer OG total → robust mod katalog-bred
 // RPC's LIMIT/tolerance-problemer og mod OCR-misreads (en forkert OCR booster bare intet).
-function numberBonus(candNumber, ocr) {
+function numberBonus(candNumber, ocr, game) {
   if (!ocr?.number) return 0
   const cand = parseCardNum(candNumber)
   if (ocr.isCode) {
     // Region-agnostisk: OCR læser tit regionen forkert/mangelfuldt ("PSV-O11"/"BLAR-ENO54" vs
-    // katalogets "PSV-EN011"/"BLAR-EN054") → sammenlign KUN set-prefix + trailing-nummer.
+    // katalogets "PSV-EN011"/"BLAR-EN054") → sammenlign KUN set-prefix + trailing-nummer. Samme
+    // variant-nøgler som codeSearch (eksakt + trim + OP tabt-førstegn) → injicerede kort får bonussen.
     const a = codeKeyN(cand.raw)
-    if (!a) return 0
-    if (a === codeKeyN(ocr.number)) return 0.55
-    // spuriøst-bagciffer-recovery (samme regel som codeSearch): så trim-injicerede kort får bonussen
-    return a === codeKeyTrimLast(ocr.number) ? 0.55 : 0
+    return a && codeVariantKeys(ocr.number, game).has(a) ? 0.55 : 0
   }
   if (cand.num == null || cand.num !== String(ocr.number)) return 0
   if (ocr.setTotal && cand.total) return cand.total === ocr.setTotal ? 0.55 : 0.12  // total skelner base vs base2
@@ -724,7 +730,7 @@ export default async function handler(req, res) {
   const scored = candidatePool.map(c => {
     const clip   = c.clipSim
     const ph     = c.phashDist !== null ? 1 - c.phashDist / 64 : 0
-    const number = numberBonus(c.number, ocrResult)
+    const number = numberBonus(c.number, ocrResult, safeGame)
     const name   = safeGame === 'pokemonjp'
       ? nameBonusJa(c.nameJaNorm, ocrJaTokens)
       : nameBonus(c.name, ocrName)   // navn+nummer der begge matcher = krydsvalideret → ~1.0
