@@ -535,6 +535,7 @@ function AuthScreen({ onAuth }) {
 function CameraModal({ onCapture, onClose }) {
   const videoRef = useRef()
   const streamRef = useRef()
+  const frameRef = useRef()
   const [ready, setReady] = useState(false)
   const [err, setErr] = useState('')
 
@@ -571,10 +572,31 @@ function CameraModal({ onCapture, onClose }) {
   }, [])
 
   function capture() {
+    const video = videoRef.current
+    const Vw = video.videoWidth, Vh = video.videoHeight
     const canvas = document.createElement('canvas')
-    canvas.width = videoRef.current.videoWidth
-    canvas.height = videoRef.current.videoHeight
-    canvas.getContext('2d').drawImage(videoRef.current, 0, 0)
+    const ctx = canvas.getContext('2d')
+
+    // Crop til viewfinder-rammen brugeren har alignet kortet til, i stedet for hele kamera-billedet.
+    // Kortet fylder så rammen (som kataloget) → bedre CLIP + kode-crops rammer rigtigt. Video vises med
+    // object-fit:cover, så vi mapper rammens skærm-rektangel tilbage til video-pixels via cover-skaleringen.
+    // Lille margin (kortet kan stikke lidt ud over guiden) + fald tilbage til fuld-frame ved usikker geometri.
+    let cx = 0, cy = 0, cw = Vw, ch = Vh
+    const vr = video.getBoundingClientRect()
+    const fr = frameRef.current?.getBoundingClientRect()
+    if (fr && vr.width > 0 && vr.height > 0 && Vw > 0 && Vh > 0) {
+      const s = Math.max(vr.width / Vw, vr.height / Vh)   // cover-skala
+      const ox = (vr.width - Vw * s) / 2, oy = (vr.height - Vh * s) / 2
+      const M = 0.06
+      let vx = ((fr.left - vr.left) - ox) / s, vy = ((fr.top - vr.top) - oy) / s
+      let vw = fr.width / s, vh = fr.height / s
+      vx -= vw * M; vy -= vh * M; vw *= (1 + 2 * M); vh *= (1 + 2 * M)
+      vx = Math.max(0, vx); vy = Math.max(0, vy)
+      vw = Math.min(Vw - vx, vw); vh = Math.min(Vh - vy, vh)
+      if (vw > Vw * 0.25 && vh > Vh * 0.25) { cx = vx; cy = vy; cw = vw; ch = vh }
+    }
+    canvas.width = Math.round(cw); canvas.height = Math.round(ch)
+    ctx.drawImage(video, Math.round(cx), Math.round(cy), Math.round(cw), Math.round(ch), 0, 0, Math.round(cw), Math.round(ch))
     streamRef.current?.getTracks().forEach(t => t.stop())
     onCapture(canvas.toDataURL('image/jpeg', 0.85))
   }
@@ -587,7 +609,7 @@ function CameraModal({ onCapture, onClose }) {
       {!err && (
         <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', paddingBottom: 140 }}>
           {/* Card frame — box-shadow creates the dark surround with a clear cutout window */}
-          <div style={{
+          <div ref={frameRef} style={{
             position: 'relative',
             width: '62vw',
             aspectRatio: '3/4',
