@@ -217,14 +217,26 @@ def _parse_number(texts: list[str], game: str) -> dict:
     joined = [t.replace(" ", "") for t in texts]
 
     if is_code_game:
+        # Prefix {1,6}: promo-koder har ét-tegns prefix ("P-399"). Skip effekt-tekst-ord: et rent-bogstav-
+        # prefix på ≥5 tegn er engelsk ("ITGETS-30000" fra 'it gets -30000 power'), ikke en set-kode
+        # (ægte koder er korte ELLER har et ciffer: BT20, OP09, P, EX10). Første ægte kode-token vinder.
+        # Tail = [0-9OISB]{0,3}[0-9]: SKAL slutte på et ægte ciffer → rarity-suffikset "S" (SPR/SR) bliver
+        # IKKE slugt som trailing "5" (BT5-038 SPR → "BT5-038", ikke "BT5-0385"; kilden til trailing-5-misreads).
         for t in joined:
-            m = re.search(r"([A-Z0-9]{2,6})-([A-Z]{0,4})([0-9OISB]{1,4})", t.upper())
+            for m in re.finditer(r"([A-Z0-9]{1,6})-([A-Z]{0,4})([0-9OISB]{0,3}[0-9])", t.upper()):
+                if not any(ch.isdigit() for ch in m.group(3)):
+                    continue  # KRÆV ægte ciffer i rå-halen → ellers matcher navne ("BLUE-EYES" hale "S"→"5")
+                if len(m.group(1)) >= 5 and m.group(1).isalpha():
+                    continue  # effekt-tekst-ord, ikke set-kode
+                tail = m.group(3).translate(str.maketrans("OISB", "0158"))
+                return {"number": f"{m.group(1)}-{m.group(2)}{tail}", "setTotal": None, "isCode": True}
+        # Bindestreg tabt af recognizer: 2 bogstaver + 2-cifret sæt + 3-cifret nummer ("OP09118"→"OP09-118",
+        # "BT20140"→"BT20-140"), evt. + rarity-suffiks (SPR/SR). Specifikt format → lav false-positive-risiko.
+        for t in joined:
+            u = re.sub(r"[^A-Z0-9]", "", t.upper())
+            m = re.fullmatch(r"([A-Z]{2}\d{2})(\d{3})[A-Z]{0,3}", u)
             if m:
-                # KRÆV et ÆGTE ciffer i rå-halen (ikke O/I/S/B) → ellers matcher navne som "BLUE-EYES"
-                # (hale "S" → "5") fejlagtigt som kode. Derefter normalisér tal-forvirring i halen.
-                if any(ch.isdigit() for ch in m.group(3)):
-                    tail = m.group(3).translate(str.maketrans("OISB", "0158"))
-                    return {"number": f"{m.group(1)}-{m.group(2)}{tail}", "setTotal": None, "isCode": True}
+                return {"number": f"{m.group(1)}-{m.group(2)}", "setTotal": None, "isCode": True}
 
     # slash-format NNN/NNN
     for t in joined:
